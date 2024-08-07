@@ -16,9 +16,9 @@ Based on work of :
 
 ## Installation
 
-First you need to install the ESP8266 Board package in your Arduino IDE.
+First you need to install the ESP8266 Board package in platformio.
 
-Then you can load the sketch from the Arduino IDE.
+Then you can load the sketch from the platformio.
 
 ## Configuration
 
