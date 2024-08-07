@@ -1,0 +1,27 @@
+<h2>Configuration</h2>
+<form id="configuration">
+    <h3>WiFi</h3>
+    <label for="ssid">SSID:</label>
+    <input type="text" id="wifi_ssid" required>
+    
+    <label for="wifi-password">Password:</label>
+    <input type="text" id="wifi_password" required>
+
+    <h3>MQTT</h3>
+    <label for="mqtt-url">URL:</label>
+    <input type="text" id="mqtt_url" required>
+
+    <label for="mqtt-port">Port:</label>
+    <input type="number" id="mqtt_port" required>
+
+    <label for="mqtt-username">Username:</label>
+    <input type="text" id="mqtt_username" required>
+
+    <label for="mqtt-password">Password:</label>
+    <input type="text" id="mqtt_password" required>
+
+    <label for="mqtt-topic">Publish Topic:</label>
+    <input type="text" id="mqtt_publish_topic" required>
+
+    <button type="submit" onclick="return sendConfiguration()">Enregistrer</button>
+</form>

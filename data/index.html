@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration Microcontrôleur</title>
+    <style>
+         body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding-top: 60px; /* Spacing for fixed navbar */
+        }
+        .navbar {
+            background-color: #007BFF;
+            position: fixed;
+            top: 0;
+            width: 100%;
+            padding: 10px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .navbar ul {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .navbar li {
+            margin: 0 15px;
+        }
+        .navbar a {
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .navbar a:hover {
+            text-decoration: underline;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 300px;
+            margin: auto;
+        }
+        h2 {
+            text-align: center;
+            color: #333333;
+        }
+        form , form div{
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            margin-bottom: 5px;
+            color: #555555;
+        }
+        input[type="text"], input[type="password"], input[type="number"] {
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #cccccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        dialog {
+            border: none;
+            overflow: hidden;
+        }
+        dialog::backdrop {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        .loader {
+            border: 16px solid rgba(243, 243, 243, 0.8); /* Semi-transparent */
+            border-radius: 50%;
+            border-top: 16px solid #007BFF;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            margin: auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <script type="text/javascript" src="script.js"></script>
+</head>
+<body>
+    <div class="navbar">
+        <ul>
+            <li><a href="#" onclick="loadPage('configuration')">Home</a></li>
+            <li><a href="#" onclick="loadPage('inverters')">Inverter</a></li>
+        </ul>
+    </div>
+    <dialog id="loader-dialog">
+        <div class="loader"></div>
+    </dialog>
+    <div id="content-container" class="container"></div>
+</body>
+</html>
