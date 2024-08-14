@@ -3,6 +3,7 @@
 
 #include <panel_data.h>
 #include <Arduino.h>
+#define DEBUG
 
 #define log_line(a) Serial.println(a)
 #define log(a) Serial.print(a)

@@ -39,9 +39,9 @@ void setup()
     mqtt_begin(config.mqtt_url, config.mqtt_port);
     loadInverterConfig(inverters);
     ecu_begin();
-    #ifdef DEBUG
+#ifdef DEBUG
     Serial.println(F("Setup OK - initializing"));
-    #endif
+#endif
     ecu_initialize();
 
     for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
@@ -62,9 +62,9 @@ void setup()
   }
 
   webserver_begin(); // Actually start the server
-  #ifdef DEBUG
+#ifdef DEBUG
   log_line("HTTP server started");
-  #endif
+#endif
 }
 
 void loop()
@@ -96,15 +96,17 @@ void loop()
       ecu_poll(&inverters[i]);
 
       if (inverters[i].paired)
+      {
         mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
+      }
     }
     log_total(inverters, MAX_INVERTER_COUNT);
   }
 
-  //   ecu.ping();
-  #ifdef DEBUG
+//   ecu.ping();
+#ifdef DEBUG
   printf("[Server Connected] : %s\n", getIP());
-  #endif
+#endif
   webserver_loop();
 
   mqtt_loop();

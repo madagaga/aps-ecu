@@ -17,7 +17,7 @@ void log_inverter(Inverter *inverter)
 {
   Serial.printf_P(PSTR("Serial: %02X-%02X-%02X-%02X-%02X-%02X\n"), inverter->serial[0], inverter->serial[1], inverter->serial[2], inverter->serial[3], inverter->serial[4], inverter->serial[5]);
   Serial.printf_P(PSTR("ID: %02X-%02X\n"), inverter->iD[0], inverter->iD[1]);
-  Serial.printf_P(PSTR("Type: %i\n"), inverter->type);
+  Serial.printf_P(PSTR("Type: %i\n"), inverter->invType);
   Serial.printf_P(PSTR("Idx: %i\n"), inverter->idx);
 
   Serial.printf_P(PSTR("Polled: %i\n"), inverter->polled);

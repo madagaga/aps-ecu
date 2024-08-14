@@ -17,7 +17,7 @@
 #define ZB_RESET D5
 #endif
 
-#define DEBUG
+
 
 void zigbee_begin();
 void zigbee_reset();

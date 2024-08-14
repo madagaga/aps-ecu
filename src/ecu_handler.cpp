@@ -353,7 +353,7 @@ void ecu_decode_poll_answer(Inverter *inverter)
     // TODO : check array size, should be < 223
     //inverter->signalQuality = extractValueFromHexBytes(42, 1, zb_buffer) * 100 / 255;
     inverter->polled = false;
-    if (inverter->type == DS3) // DS3
+    if (inverter->invType == DS3) // DS3
     {
         #ifdef DEBUG
         log_line(F("DS3 inverter"));
@@ -371,10 +371,22 @@ void ecu_decode_poll_answer(Inverter *inverter)
         inverter->panels[0].energy = toFloat(zb_buffer,offset + 50, 4) / 65535;
         inverter->panels[1].energy = toFloat(zb_buffer,offset + 54, 4) / 65535;
 
+        #ifdef DEBUG
+        Serial.printf_P(PSTR("DC STATE : %02X\n"), zb_buffer[offset + 24]);
+        #endif
 
         // ac voltage
         inverter->acVoltage = toFloat(zb_buffer,offset + 34, 2) / DS3_AC_VOLTAGE_FACTOR;
-        inverter->acPower = toInt(zb_buffer,offset + 40, 2) ;
+        //inverter->acPower = toInt(zb_buffer,offset + 40, 2) ;
+
+        inverter->acPower = inverter->panels[0].dcVoltage * inverter->panels[0].dcCurrent;
+        inverter->acPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
+
+        if(inverter->acPower > 1000)
+        {
+            inverter->acPower = 0;
+        }
+
         //dc mptt 
         inverter->dcMpttVoltage = toFloat(zb_buffer,offset + 42, 2) * DS3_DC_VOLTAGE_FACTOR;
         // freq

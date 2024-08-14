@@ -13,7 +13,7 @@ int16_t indexOf(const char *data, const char pattern, int startIndex)
     return -1;
 }
 
-int16_t indexOf(const uint8_t *data, uint8_t data_len, const uint8_t *pattern, uint8_t pattern_len)
+int16_t indexOf(const uint8_t *data, uint16_t data_len, const uint8_t *pattern, uint8_t pattern_len)
 {
     if (data_len < pattern_len)
     {        

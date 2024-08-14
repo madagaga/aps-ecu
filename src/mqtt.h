@@ -5,8 +5,9 @@
 #include <PubSubClient.h>
 #include <panel_data.h>
 #include <wifi.h>
+#include <logger.h>
 
-#define MQTT_CLIENT_ID "aps_ecu_inverter"
+#define MQTT_CLIENT_ID "aps_ecu"
 
 static WiFiClient espClient;
 static PubSubClient mqttClient(espClient);

@@ -27,7 +27,7 @@ typedef struct
 {    
     uint8_t serial[6] = {0};
     uint8_t iD[2] = {0};
-    InverterType type = DS3;
+    InverterType invType = DS3;
     uint8_t idx = 0;  
     bool paired = false;  
     bool polled = false;
