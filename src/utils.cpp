@@ -1,9 +1,8 @@
 #include <utils.h>
 
 int16_t indexOf(const char *data, const char pattern, int startIndex)
-{
-
-    for (int i = startIndex; i < MAX_CONFIG_LINE_SIZE; i++)
+{   
+    for (int i = startIndex; i < (startIndex + MAX_CONFIG_LINE_SIZE); i++)
     {
         if (data[i] == pattern)
         {

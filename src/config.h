@@ -7,6 +7,8 @@
 #include <logger.h>
 #include <utils.h>
 
+
+#define MAX_CONFIG_LINE_SIZE 255
 #define CONFIG_PATH "/config.txt"
 #define INVERTER_PATH "/inverters_config.txt"
 

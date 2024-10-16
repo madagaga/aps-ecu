@@ -297,7 +297,7 @@ void ecu_poll(Inverter *inverter)
         index = zigbee_recv(zb_buffer);
     }
 }
-/* 
+/* from yc600 
 # 000-104: len 105: APsystems DS3-S ZigBee af_incoming_msg for af_data_request FBFB06BB000000000000C1FEFE
 # 000-005: len 06: 0x70 0x20 0x00 0xaa 0xbb 0xcc : inverter serial number
 # 006-007: len 02: 0xfb 0xfb           : tag_start
@@ -331,6 +331,27 @@ void ecu_poll(Inverter *inverter)
 # 101-102: len 02: 0x38 0x3c           : sum (008-100)
 # 103-104: len 02: 0xfe 0xfe           : tag_end
 */
+
+/* from DS3 
+ignore the first 21
+0-13  : len 14 : FE 7D 44 81 00 00 06 01 76 03 14 14 00 : Header
+14-19 : len 6  : 73 00 CE 16 01 00                      : Unknown Field 1
+20-31 : len 12 : 69 70 30 00 08 08 35 FB FB 5C BB BB    : Serial Number (703000080835)
+32-51 : len 20 : 20 00 03 00 0F FF FF 00 00 00 00 00 00 : Unknown Field 2
+52-53 : len 2  : 06 B6                                 : DC Voltage Panel 2 (DCV2)
+54-55 : len 2  : 06 B4                                 : DC Voltage Panel 1 (DCV1)
+56-57 : len 2  : 00 1E                                 : DC Voltage Panel 3 (DCV3)
+58-59 : len 2  : 00 29                                 : DC Voltage Panel 4 (DCV4)
+60-61 : len 2  : 03 7F                                 : AC Voltage (ACV)
+62-63 : len 2  : 13 89                                 : Frequency
+64-67 : len 4  : 04 04 00 15                           : Timestamp (4 bytes)
+68-71 : len 4  : 00 1D FF FF                           : Unknown Field 3
+72-75 : len 4  : 04 F4 0A 2A                           : Energy 1
+76-79 : len 4  : 00 03 B1 FD                           : Energy 2
+80-83 : len 4  : 00 04 D8 16                           : Unknown Field 4
+84-143: len 60 : FF FF FF ... FF                       : Unknown Field (Padding or Metadata)
+144-147: len 4 : 37 B9 FE FF                           : Footer
+*/
 void ecu_decode_poll_answer(Inverter *inverter)
 {
     #ifdef DEBUG
@@ -350,8 +371,8 @@ void ecu_decode_poll_answer(Inverter *inverter)
     }
 
 
-    // TODO : check array size, should be < 223
-    //inverter->signalQuality = extractValueFromHexBytes(42, 1, zb_buffer) * 100 / 255;
+    // TODO : check array size, should be < 223    
+    //inverter->signalQuality = (toInt(zb_buffer, offset + 14, 2) * 100) / 255;
     inverter->polled = false;
     if (inverter->invType == DS3) // DS3
     {
@@ -377,7 +398,7 @@ void ecu_decode_poll_answer(Inverter *inverter)
 
         // ac voltage
         inverter->acVoltage = toFloat(zb_buffer,offset + 34, 2) / DS3_AC_VOLTAGE_FACTOR;
-        //inverter->acPower = toInt(zb_buffer,offset + 40, 2) ;
+        
 
         inverter->acPower = inverter->panels[0].dcVoltage * inverter->panels[0].dcCurrent;
         inverter->acPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
@@ -395,7 +416,7 @@ void ecu_decode_poll_answer(Inverter *inverter)
         // temp * 0.0198 - 23.84
         inverter->temperature = toFloat(zb_buffer,offset + 48, 2) * 0.0198 - 23.84;
 
-        inverter->timeStamp = toInt(zb_buffer,offset + 38, 2);
+        inverter->timeStamp = toInt(zb_buffer,offset + 38, 4);
         // 
         inverter->status = zb_buffer[offset + 58];
         // TODO : energy
