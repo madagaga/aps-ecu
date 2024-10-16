@@ -10,8 +10,8 @@ Based on work of :
 
 - Supports APSystems YC600, QS1 and DS3 inverters
 - Supports ZigBee communication
-- Supports multiple inverters
-- Publishes data to mqtt
+- Supports multiple inverters (may be limited by memory) tested with 3 inverters and 2 panel on each. 
+- Publishes data to mqtt - actually user/password not supported 
 - Configurable via web interface
 
 ## Installation
@@ -28,7 +28,10 @@ The configuration is stored in the `LittleFS` of the ESP8266.
 
 You can access the web interface by entering the IP address of your ESP8266 in your browser.
 
-The web interface allows you to configure the wifi connection, the mqtt broker, the inverters and the MQTT topics.
+The web interface allows you to configure the wifi connection, the mqtt broker, the inverters and the MQTT topics.  
+
+After first flash wifi AP will be available "APS_ECU" "12345678".  
+Default ip : 192.168.4.1
 
 ### MQTT topics
 
