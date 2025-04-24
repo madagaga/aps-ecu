@@ -2,3 +2,4 @@
 .vscode
 data/config.txt
 data/inverter_config.txt
+ignore.*

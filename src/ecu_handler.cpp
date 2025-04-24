@@ -370,6 +370,8 @@ void ecu_decode_poll_answer(Inverter *inverter)
         return;
     }
 
+    
+
 
     // TODO : check array size, should be < 223    
     //inverter->signalQuality = (toInt(zb_buffer, offset + 14, 2) * 100) / 255;
@@ -388,9 +390,13 @@ void ecu_decode_poll_answer(Inverter *inverter)
         inverter->panels[0].dcCurrent = toFloat(zb_buffer,offset + 30, 2) * DS3_DC_CURRENT_FACTOR;
         inverter->panels[1].dcCurrent = toFloat(zb_buffer,offset + 32, 2) * DS3_DC_CURRENT_FACTOR;
 
+        // Save old energy and timestamp
+        float oldEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
+        int oldTimestamp = inverter->timeStamp;
+
         // dc energy 
-        inverter->panels[0].energy = toFloat(zb_buffer,offset + 50, 4) / 65535;
-        inverter->panels[1].energy = toFloat(zb_buffer,offset + 54, 4) / 65535;
+        inverter->panels[0].energy = (toFloat(zb_buffer,offset + 50, 4) / (float)1000 / 100) * 1.66;
+        inverter->panels[1].energy = (toFloat(zb_buffer,offset + 54, 4) / (float)1000 / 100) * 1.66;
 
         #ifdef DEBUG
         Serial.printf_P(PSTR("DC STATE : %02X\n"), zb_buffer[offset + 24]);
@@ -400,9 +406,32 @@ void ecu_decode_poll_answer(Inverter *inverter)
         inverter->acVoltage = toFloat(zb_buffer,offset + 34, 2) / DS3_AC_VOLTAGE_FACTOR;
         
 
-        inverter->acPower = inverter->panels[0].dcVoltage * inverter->panels[0].dcCurrent;
-        inverter->acPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
+        // Calculate DC power (V×I method)
+        float dcPower = inverter->panels[0].dcVoltage * inverter->panels[0].dcCurrent;
+        dcPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
 
+        // Calculate energy-based power if we have valid previous readings
+        inverter->timeStamp = toInt(zb_buffer,offset + 38, 2);
+        float newEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
+        int timeDiff = inverter->timeStamp - oldTimestamp;
+        
+        if (oldTimestamp > 0 && timeDiff > 0) {
+            float energyDiff = newEnergy - oldEnergy;
+            
+            // Only update if energy increased (avoid negative power on reset)
+            if (energyDiff > 0) {
+                // Convert energy diff (Wh) to power (W) using time diff (seconds)
+                inverter->acPower = (energyDiff / timeDiff) * 3600;
+            } else {
+                // Fallback to DC power calculation
+                inverter->acPower = dcPower;
+            }
+        } else {
+            // First reading or timestamp reset, use DC power
+            inverter->acPower = dcPower;
+        }
+        
+        // Cap power at 1000W
         if(inverter->acPower > 1000)
         {
             inverter->acPower = 0;
@@ -416,12 +445,8 @@ void ecu_decode_poll_answer(Inverter *inverter)
         // temp * 0.0198 - 23.84
         inverter->temperature = toFloat(zb_buffer,offset + 48, 2) * 0.0198 - 23.84;
 
-        inverter->timeStamp = toInt(zb_buffer,offset + 38, 4);
-        // 
         inverter->status = zb_buffer[offset + 58];
-        // TODO : energy
-        inverter->energy = (toFloat(zb_buffer,offset + 50, 4) / (float)1000 / 100) * 1.66;
-        inverter->energy += (toFloat(zb_buffer,offset + 54, 4) / (float)1000 / 100) * 1.66;
+        inverter->energy = newEnergy;
 
         
         
@@ -444,5 +469,3 @@ void ecu_noop()
     zigbee_recv(zb_buffer);
     zigbee_recv(zb_buffer);
 }
-
-

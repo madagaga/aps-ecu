@@ -95,7 +95,7 @@ void loop()
     {
       ecu_poll(&inverters[i]);
 
-      if (inverters[i].paired)
+      if (inverters[i].paired && inverters[i].polled)
       {
         mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
       }
@@ -110,6 +110,7 @@ void loop()
   webserver_loop();
 
   mqtt_loop();
+
 
   // ecu.heart_beat();
   delay(1000);

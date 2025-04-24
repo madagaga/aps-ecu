@@ -3,6 +3,7 @@
 
 #include <SoftwareSerial.h>
 #include <logger.h>
+#include <commands.h>
 
 /* SERIAL */
 #if defined(__AVR_ATmega328P__)

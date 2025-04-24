@@ -83,3 +83,8 @@ The payload sent to the MQTT broker is a JSON object containing the inverter's d
 ## Dependencies
 - `plerup/EspSoftwareSerial@^8.1.0`
 - `knolleary/PubSubClient@^2.8`
+
+## pinouts  
+- RX pin D7 
+- TX pin D8
+- ZB_RESET pin D5

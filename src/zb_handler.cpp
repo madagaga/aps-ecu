@@ -40,7 +40,7 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     // serial->flush();
 
     // 0xFE is the command suffix
-    serial->write(0xFE);
+    serial->write(ZNP_SOF);
 
     // size is buffer len without command 2 bytes
     serial->write(buffer_len - 2);

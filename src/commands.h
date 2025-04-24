@@ -3,10 +3,16 @@
 
 #include <Arduino.h>
 
+#define ZNP_SOF 0xFE
+
+
+
+
+
 /* ECU */
 // const uint8_t ECU_ID[]{0xD8, 0xA3, 0x01, 0x1B, 0x97, 0x80};         // "D8A3011B9780"
 // const uint8_t ECU_ID_SHORT[]{0xD8, 0xA3};                           // "D8A3"
-const uint8_t ECU_ID_REVERSE[6]{0x80, 0x97, 0x1B, 0x01, 0xA3, 0xD8}; // "80971B01A3D8"
+static const uint8_t ECU_ID_REVERSE[6]{0x80, 0x97, 0x1B, 0x01, 0xA3, 0xD8}; // "80971B01A3D8"
 // const uint8_t ECU_ID_REVERSE_SHORT[]{0xA3, 0xD8};                   // "A3D8"
 
 /* INIT COMMANDS */
