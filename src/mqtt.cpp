@@ -30,7 +30,7 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
         return;
     }
 
-    char text[512];
+    char text[768];
     sprintf(text, "{"
                   "\"type\":\"inverter\","
                   "\"serial\":\"%02X-%02X-%02X-%02X-%02X-%02X\","
@@ -56,6 +56,29 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
             Inverter->acVoltage,
             Inverter->energy,
             getMAC());
+
+    // include panels data: format [ array of panels]
+    // strcat(text, ",\"panels\":[");
+    // for (int i = 0; i < 4; i++)
+    // {
+    //     // skip panel if not present
+    //     if(Inverter->panels[i].present == false)
+    //     {
+    //         continue;
+    //     }
+    //     if (i > 0)
+    //     {
+    //         strcat(text, ",");
+    //     }
+    //     char panelText[128];
+    //     sprintf(panelText, "{\"dcVoltage\":%.2f,\"dcCurrent\":%.2f,\"energy\":%.2f}",
+    //             Inverter->panels[i].dcVoltage,
+    //             Inverter->panels[i].dcCurrent,
+    //             Inverter->panels[i].energy);
+    //     strcat(text, panelText);
+
+    // }
+    // strcat(text, "]}");
 
     Serial.println(text);
 #ifdef DEBUG
