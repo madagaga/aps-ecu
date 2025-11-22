@@ -9,10 +9,12 @@
 #include <mqtt.h>
 
 #define MAX_INVERTER_COUNT 3
+#define POLL_INTERVAL 10
 Config config;
 
 Inverter inverters[MAX_INVERTER_COUNT];
 bool all_Paired = true;
+int8_t loopCount = 0;
 
 void setup()
 {
@@ -90,17 +92,25 @@ void loop()
   }
   else
   {
-
-    for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
+    if (loopCount % POLL_INTERVAL == 0)
     {
-      ecu_poll(&inverters[i]);
+      ecu_heart_beat();
 
-      if (inverters[i].paired && inverters[i].polled)
+      for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
       {
-        mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
+        ecu_poll(&inverters[i]);
+
+        if (inverters[i].paired && inverters[i].polled)
+        {
+          mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
+        }
       }
+      log_total(inverters, MAX_INVERTER_COUNT);
     }
-    log_total(inverters, MAX_INVERTER_COUNT);
+    else 
+    {
+      Serial.printf("Polling : %d/%d", loopCount, POLL_INTERVAL);
+    }
   }
 
 //   ecu.ping();
@@ -111,7 +121,10 @@ void loop()
 
   mqtt_loop();
 
+  
+    
 
-  // ecu.heart_beat();
   delay(1000);
+
+  loopCount++;
 }

@@ -275,6 +275,14 @@ void ecu_poll(Inverter *inverter)
             inverter->polled =false;
             break;
         }
+        if (indexOf(zb_buffer, index, PAIR_UNREACHABLE, 5) > -1)
+        {
+            #ifdef DEBUG
+            log_line(F("Pair unreachable"));
+            #endif
+            inverter->polled =false;
+            break;
+        }        
         #ifdef DEBUG
         if (indexOf(zb_buffer, index, POLL_AF_DATA_REQUEST, 6) > -1)
         {
@@ -445,11 +453,15 @@ void ecu_decode_poll_answer(Inverter *inverter)
         // temp * 0.0198 - 23.84
         inverter->temperature = toFloat(zb_buffer,offset + 48, 2) * 0.0198 - 23.84;
 
-        inverter->status = zb_buffer[offset + 58];
+        inverter->status = zb_buffer[offset + 24];
         inverter->energy = newEnergy;
 
         
         
+    }
+    else 
+    {
+        Serial.println("Missing data");
     }
     inverter->polled = true;
     #ifdef DEBUG
