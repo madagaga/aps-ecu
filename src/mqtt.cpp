@@ -26,6 +26,12 @@ void mqtt_connect()
 void mqtt_begin(const char *mqtt_url, int mqtt_port)
 {
     mqttClient.setServer(mqtt_url, mqtt_port);
+    // default is 256 bytes; the payload alone is ~226 and grows if the panel
+    // block is ever enabled
+    if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE))
+    {
+        log_line(F("mqtt buffer allocation failed"));
+    }
     mqtt_connect();
 }
 
@@ -38,8 +44,10 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
         return;
     }
 
-    char text[768];
-    sprintf(text, "{"
+    // static: keeps the scratch buffer off the 4KB stack, since
+    // mqtt_publish is called from loop()
+    static char text[MQTT_BUFFER_SIZE];
+    snprintf(text, sizeof(text), "{"
                   "\"type\":\"inverter\","
                   "\"serial\":\"%02X-%02X-%02X-%02X-%02X-%02X\","
                   "\"id\":\"%02X-%02X\","
