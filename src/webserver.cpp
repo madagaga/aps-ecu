@@ -1,5 +1,8 @@
 #include <webserver.h>
 
+// listens for HTTP requests on port 80
+static ESP8266WebServer server(80);
+
 void handleConfig(){
 
   String s = server.arg("plain");
@@ -26,7 +29,7 @@ void handleInverterConfig(){
 
 
 bool handleFileRead(String path) { // send the right file to the client (if it exists)
-  Serial.printf("handleFileRead: %s\n",path.c_str());
+  logf("handleFileRead: %s\n",path.c_str());
   if (path.endsWith("/")) path += "index.html";         // If a folder is requested, send the index file
   String contentType = path.endsWith(".html") ? "text/html" : "text/plain";            // Get the MIME type
   if (LittleFS.exists(path)) {                            // If the file exists

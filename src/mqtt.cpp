@@ -1,4 +1,12 @@
 #include <mqtt.h>
+#include <PubSubClient.h>
+#include <wifi.h>
+#include <logger.h>
+
+// Single instance, owned by this translation unit. Defining these in the
+// header gave every includer its own unused copy.
+static WiFiClient espClient;
+static PubSubClient mqttClient(espClient);
 
 void mqtt_connect()
 {
@@ -6,11 +14,11 @@ void mqtt_connect()
     {
         if (mqttClient.connect(MQTT_CLIENT_ID))
         {
-            Serial.println(F("mqtt connected"));
+            log_line(F("mqtt connected"));
         }
         else
         {
-            Serial.printf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
+            logf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
         }
     }
 }
@@ -25,7 +33,7 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
 {
     if (!mqttClient.connected())
     {
-        Serial.println(F("mqtt not connected"));
+        log_line(F("mqtt not connected"));
 
         return;
     }
@@ -43,7 +51,7 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
                   "\"temperature\":%.2f,"
                   "\"voltage\":%.2f,"
                   "\"energy\":%.2f,"
-                  "\"mac\":\"%s\""
+                  "\"deviceID\":\"%s\""
                   "}",
             Inverter->serial[0], Inverter->serial[1], Inverter->serial[2], Inverter->serial[3], Inverter->serial[4], Inverter->serial[5],
             Inverter->iD[0], Inverter->iD[1],
@@ -80,10 +88,10 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
     // }
     // strcat(text, "]}");
 
-    Serial.println(text);
+    log_line(text);
 #ifdef DEBUG
     bool ret = mqttClient.publish(topic, text);
-    Serial.printf_P(PSTR("Publishin to '%s' : %i\n"),topic, ret);
+    logf_P(PSTR("Publishin to '%s' : %i\n"),topic, ret);
 #else
     mqttClient.publish(topic, text);
 #endif
