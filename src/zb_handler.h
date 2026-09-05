@@ -48,6 +48,10 @@
 #define ZNP_AF_DATA_REQUEST_SRSP     0x6401
 #define ZNP_AF_DATA_REQUEST_EXT_SRSP 0x6402
 
+// ZDO indications the coordinator emits on its own; nothing here acts on them
+#define ZNP_ZDO_STATE_CHANGE_IND     0x45C0
+#define ZNP_ZDO_SRC_RTG_IND          0x45C4
+
 #define AF_STATUS_SUCCESS  0x00
 #define AF_STATUS_NO_ROUTE 0xCD
 

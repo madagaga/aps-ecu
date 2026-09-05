@@ -31,7 +31,6 @@ void log_inverter(Inverter *inverter)
   Serial.printf_P(PSTR("Temperature: %.2f°C\n"), inverter->temperature);
   
   Serial.printf_P(PSTR("AC Voltage: %.2fV\n"), inverter->acVoltage);
-  Serial.printf_P(PSTR("MPTT: %.2fV\n"), inverter->dcMpttVoltage);
 
   //0x00 (both panel power generate), 0x02 (under/overload?), 0x03 (no power generate), 0x04 (???), 0x05 (only DC2 power generate), 0x06 (only DC1 power generate), 0x0b (boot up?), 0x0c (boot up?)
   switch(inverter->status)

@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 
-#define DS3_DC_VOLTAGE_FACTOR (float)1/48;
-#define DS3_DC_CURRENT_FACTOR 0.0125;
-#define DS3_AC_VOLTAGE_FACTOR 3.8;
+#define DS3_DC_VOLTAGE_FACTOR ((float)1 / 48)
+#define DS3_DC_CURRENT_FACTOR 0.0125f
+#define DS3_AC_VOLTAGE_FACTOR 3.8f
 
 typedef enum InverterType
 {
@@ -37,7 +37,6 @@ typedef struct
     float frequency = 0; // Hz";
     float temperature = 0;
     float acVoltage = 0; //v 
-    float dcMpttVoltage = 0; // V
     uint8_t status = 0;
     uint8_t signalQuality = 0; // link quality, 0-100
     PanelData panels[4];

@@ -131,11 +131,19 @@ bool ecu_heart_beat()
     #endif
     const uint8_t check[2] = {0x07, 0x09};
     zigbee_send(HEART_BEAT_COMMAND, sizeof(HEART_BEAT_COMMAND));
-    zigbee_recv(zb_buffer);
+    memset(&zb_buffer, 0, sizeof(zb_buffer));
+    const uint16_t received = zigbee_recv(zb_buffer);
 
-    int16_t index = indexOf(zb_buffer, MAX_SERIAL_BUFFER_SIZE, ECU_ID_REVERSE, 6);
+    if (received == 0 || received == ZB_RECV_INVALID)
+    {
+        return false;
+    }
 
-    if (index > -1)
+    // searching the whole 512-byte buffer could match leftovers from an
+    // earlier frame
+    const int16_t index = indexOf(zb_buffer, received, ECU_ID_REVERSE, 6);
+
+    if (index > -1 && index + 9 < (int16_t)received)
     {
         if (zb_buffer[index + 8] == check[0] && zb_buffer[index + 9] == check[1])
         {
@@ -342,6 +350,11 @@ void ecu_poll(Inverter *inverter)
             ecu_decode_poll_answer(inverter, AF_PAYLOAD(data), AF_PAYLOAD_LEN(data));
             break;
 
+        // unsolicited, and the CC2530 sends ZDO_SRC_RTG_IND twice per poll
+        case ZNP_ZDO_STATE_CHANGE_IND:
+        case ZNP_ZDO_SRC_RTG_IND:
+            break;
+
         default:
             #ifdef DEBUG
             logf_P(PSTR("unhandled ZNP command %04X\n"), cmd);
@@ -494,8 +507,6 @@ void ecu_decode_poll_answer(Inverter *inverter, const uint8_t *payload, uint8_t 
             inverter->acPower = 0;
         }
 
-        //dc mptt 
-        inverter->dcMpttVoltage = toFloat(payload, 42, 2) * DS3_DC_VOLTAGE_FACTOR;
         // freq
         inverter->frequency = toFloat(payload, 36, 2) / 100;
 
