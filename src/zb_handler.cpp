@@ -30,9 +30,11 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     uint8_t chunk = 0;
     uint8_t crc = 0;
     crc ^= (buffer_len - 2);
+#ifdef DEBUG_FRAMES
     log("S : ");
+#endif
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
     log(F("FE"));
     logf("-%02X", buffer_len - 2);
 #endif
@@ -48,13 +50,13 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     for (uint8_t i = 0; i < buffer_len; i++)
     {
         chunk = buffer[i];
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
         logf("-%02X", chunk);
 #endif
         serial->write(chunk);
         crc ^= chunk;
     }
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
     logf("-%02X", crc);
     log_line("");
 #endif
@@ -70,7 +72,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
     uint16_t index = 0;
     uint16_t size = 255;
     uint8_t chunk;
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
     log(F("R : "));
 #endif
     uint8_t tries = 0;
@@ -78,7 +80,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
     {
         delay(500); // we wait if there comes more data
         tries++;
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
         log(F("."));
 #endif
     }
@@ -92,7 +94,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
 
             delay(100);
             tries++;
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
             log(F("."));
 #endif
             continue;
@@ -112,7 +114,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
                 size = chunk + 5;
             }
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
             if (index == 0)
                 logf("%02X", chunk);
             else
@@ -123,7 +125,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
         }
         else
         {
-#ifdef DEBUG
+#ifdef DEBUG_FRAMES
             log_line("Inverter::_read");
 #endif
             serial->read();
@@ -131,7 +133,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
     }
 
 #ifdef DEBUG
-    logf_P(PSTR("  |  index : %d  |  size : %d "), index, size - 5);
+    logf_P(PSTR("R : received %d, declared %d"), index, size);
     log_line("");
 #endif
 

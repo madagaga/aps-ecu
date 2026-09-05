@@ -4,6 +4,9 @@
 #include <panel_data.h>
 #include <Arduino.h>
 #define DEBUG
+// Per-byte hex dump of every zigbee frame. It runs interleaved with the
+// bit-banged SoftwareSerial transfer, so leaving it on costs received bytes.
+// #define DEBUG_FRAMES
 
 #define log_line(a) Serial.println(a)
 #define log(a) Serial.print(a)
