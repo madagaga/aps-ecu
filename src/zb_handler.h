@@ -20,11 +20,43 @@
 
 
 
+/*
+ * ZNP frame layout (TI Z-Stack):
+ *   SOF(1) | LEN(1) | CMD0(1) | CMD1(1) | DATA[LEN] | FCS(1)
+ * zigbee_recv() only returns frames whose LEN and FCS check out, so these
+ * accessors are safe to use on whatever it hands back.
+ */
+#define ZNP_LEN(f)  ((f)[1])
+#define ZNP_CMD(f)  ((uint16_t)(((f)[2] << 8) | (f)[3]))
+#define ZNP_DATA(f) ((f) + 4)
+
+#define ZNP_AF_DATA_CONFIRM          0x4480
+#define ZNP_AF_INCOMING_MSG          0x4481
+#define ZNP_AF_DATA_REQUEST_SRSP     0x6401
+#define ZNP_AF_DATA_REQUEST_EXT_SRSP 0x6402
+
+#define AF_STATUS_SUCCESS  0x00
+#define AF_STATUS_NO_ROUTE 0xCD
+
+/*
+ * AF_INCOMING_MSG data field, relative to ZNP_DATA:
+ *   GroupID(2) ClusterID(2) SrcAddr(2) SrcEndpoint(1) DstEndpoint(1)
+ *   WasBroadcast(1) LinkQuality(1) SecurityUse(1) TimeStamp(4)
+ *   TransSeqNumber(1) Len(1) Data[Len]
+ * 4 + 17 = 21, which is where the APsystems payload starts.
+ */
+#define AF_HEADER_SIZE     17
+#define AF_SRC_ADDR(d)     ((d) + 4)
+#define AF_LINK_QUALITY(d) ((d)[9])
+#define AF_PAYLOAD_LEN(d)  ((d)[16])
+#define AF_PAYLOAD(d)      ((d) + AF_HEADER_SIZE)
+
+
 void zigbee_begin();
 void zigbee_reset();
 void zigbee_flush();
 
 void zigbee_send(const uint8_t *buffer, uint8_t buffer_len);
-uint8_t zigbee_recv(uint8_t *buffer);
+uint16_t zigbee_recv(uint8_t *buffer);
 
 #endif

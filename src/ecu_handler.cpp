@@ -133,9 +133,9 @@ bool ecu_heart_beat()
     zigbee_send(HEART_BEAT_COMMAND, sizeof(HEART_BEAT_COMMAND));
     zigbee_recv(zb_buffer);
 
-    uint8_t index = indexOf(zb_buffer, MAX_SERIAL_BUFFER_SIZE, ECU_ID_REVERSE, 6);
+    int16_t index = indexOf(zb_buffer, MAX_SERIAL_BUFFER_SIZE, ECU_ID_REVERSE, 6);
 
-    if (index != -1)
+    if (index > -1)
     {
         if (zb_buffer[index + 8] == check[0] && zb_buffer[index + 9] == check[1])
         {
@@ -176,7 +176,7 @@ void ecu_pair(Inverter *inverter)
     uint8_t command[40] = {0};
     uint8_t commandIndex = 1;
     int8_t index = -1;
-    uint8_t response_size = 0;
+    uint16_t response_size = 0;
 
     while (commandIndex < 5)
     {
@@ -248,7 +248,7 @@ void ecu_poll(Inverter *inverter)
     #ifdef DEBUG
     log_line(F("****** Polling ******"));
     #endif
-    uint8_t index = 0;
+    uint16_t index = 0;
     if (inverter->_poll_command[0] == 0)
     {
         #ifdef DEBUG
@@ -267,40 +267,76 @@ void ecu_poll(Inverter *inverter)
     index = zigbee_recv(zb_buffer);
     while (index != 0)
     {
-        if (indexOf(zb_buffer, index, PAIR_NO_ROUTE, 8) > -1)
+        const uint16_t cmd = ZNP_CMD(zb_buffer);
+        const uint8_t *data = ZNP_DATA(zb_buffer);
+        const uint8_t status = ZNP_LEN(zb_buffer) > 0 ? data[0] : 0xFF;
+
+        switch (cmd)
         {
+        case ZNP_AF_DATA_CONFIRM:
+            if (status == AF_STATUS_NO_ROUTE)
+            {
+                #ifdef DEBUG
+                log_line(F("No route"));
+                #endif
+                inverter->polled = false;
+                return;
+            }
             #ifdef DEBUG
-            log_line(F("No route"));
+            log_line(F("Data confirm"));
             #endif
-            inverter->polled =false;
             break;
-        }
-        if (indexOf(zb_buffer, index, PAIR_UNREACHABLE, 5) > -1)
-        {
+
+        // the original code read this response as "unreachable"; kept as-is,
+        // the ZNP status byte itself says success
+        case ZNP_AF_DATA_REQUEST_EXT_SRSP:
             #ifdef DEBUG
             log_line(F("Pair unreachable"));
             #endif
-            inverter->polled =false;
-            break;
-        }        
-        #ifdef DEBUG
-        if (indexOf(zb_buffer, index, POLL_AF_DATA_REQUEST, 6) > -1)
-        {
-            log_line(F("Data request success"));
-        }
-        if (indexOf(zb_buffer, index, POLL_AF_DATA_CONFIRM, 5) > -1)
-        {
-            log_line(F("Data confirm"));
-        }
-        #endif
-        if (indexOf(zb_buffer, index, POLL_AF_INCOMING_MSG, 4) >-1)
-        {
+            inverter->polled = false;
+            return;
+
+        case ZNP_AF_DATA_REQUEST_SRSP:
             #ifdef DEBUG
-            log_line(F("incomming messsage"));            
+            log_line(F("Data request success"));
             #endif
-            ecu_decode_poll_answer(inverter);
+            break;
+
+        case ZNP_AF_INCOMING_MSG:
+            #ifdef DEBUG
+            log_line(F("incomming messsage"));
+            #endif
+            if (ZNP_LEN(zb_buffer) < AF_HEADER_SIZE)
+            {
+                log_line(F("truncated AF header - ignored"));
+                break;
+            }
+            // a reply from another inverter would otherwise be decoded into
+            // this one's measurements
+            if (AF_SRC_ADDR(data)[0] != inverter->iD[0] ||
+                AF_SRC_ADDR(data)[1] != inverter->iD[1])
+            {
+                logf_P(PSTR("reply from %02X-%02X while polling %02X-%02X - ignored\n"),
+                       AF_SRC_ADDR(data)[0], AF_SRC_ADDR(data)[1],
+                       inverter->iD[0], inverter->iD[1]);
+                break;
+            }
+            if (AF_HEADER_SIZE + AF_PAYLOAD_LEN(data) > ZNP_LEN(zb_buffer))
+            {
+                log_line(F("AF payload longer than frame - ignored"));
+                break;
+            }
+            inverter->signalQuality = (AF_LINK_QUALITY(data) * 100) / 255;
+            ecu_decode_poll_answer(inverter, AF_PAYLOAD(data), AF_PAYLOAD_LEN(data));
+            break;
+
+        default:
+            #ifdef DEBUG
+            logf_P(PSTR("unhandled ZNP command %04X\n"), cmd);
+            #endif
+            break;
         }
-        
+
         memset(&zb_buffer, 0, sizeof(zb_buffer));
         index = zigbee_recv(zb_buffer);
     }
@@ -360,29 +396,30 @@ ignore the first 21
 84-143: len 60 : FF FF FF ... FF                       : Unknown Field (Padding or Metadata)
 144-147: len 4 : 37 B9 FE FF                           : Footer
 */
-void ecu_decode_poll_answer(Inverter *inverter)
+// `payload` points at the APsystems data carried by an AF_INCOMING_MSG, so every
+// offset below is relative to the measurement block itself, not to the raw frame.
+void ecu_decode_poll_answer(Inverter *inverter, const uint8_t *payload, uint8_t payload_len)
 {
     #ifdef DEBUG
     log_line(F("decode poll answer"));
     #endif
 
-    // ignore 21 first element 
-    uint8_t offset = 21;
+    // the DS3 block is read up to byte 57 (energy 2 ends at 54 + 4)
+    if (payload_len < 58)
+    {
+        logf_P(PSTR("payload too short: %d bytes - ignored\n"), payload_len);
+        return;
+    }
 
-    
-    // 006 007 is tag start 
-    if(zb_buffer[offset + 6] != 0xFB && zb_buffer[offset + 7] != 0xFB){
+    // 006 007 is tag start
+    if (payload[6] != 0xFB || payload[7] != 0xFB)
+    {
         #ifdef DEBUG
         log_line(F("No tag found"));
         #endif
         return;
     }
 
-    
-
-
-    // TODO : check array size, should be < 223    
-    //inverter->signalQuality = (toInt(zb_buffer, offset + 14, 2) * 100) / 255;
     inverter->polled = false;
     if (inverter->invType == DS3) // DS3
     {
@@ -391,27 +428,27 @@ void ecu_decode_poll_answer(Inverter *inverter)
         #endif
 
         // dc voltage
-        inverter->panels[0].dcVoltage = toFloat(zb_buffer,offset + 26, 2) * DS3_DC_VOLTAGE_FACTOR;
-        inverter->panels[1].dcVoltage = toFloat(zb_buffer,offset + 28, 2) * DS3_DC_VOLTAGE_FACTOR;
+        inverter->panels[0].dcVoltage = toFloat(payload, 26, 2) * DS3_DC_VOLTAGE_FACTOR;
+        inverter->panels[1].dcVoltage = toFloat(payload, 28, 2) * DS3_DC_VOLTAGE_FACTOR;
 
         // dc current
-        inverter->panels[0].dcCurrent = toFloat(zb_buffer,offset + 30, 2) * DS3_DC_CURRENT_FACTOR;
-        inverter->panels[1].dcCurrent = toFloat(zb_buffer,offset + 32, 2) * DS3_DC_CURRENT_FACTOR;
+        inverter->panels[0].dcCurrent = toFloat(payload, 30, 2) * DS3_DC_CURRENT_FACTOR;
+        inverter->panels[1].dcCurrent = toFloat(payload, 32, 2) * DS3_DC_CURRENT_FACTOR;
 
         // Save old energy and timestamp
         float oldEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
         int oldTimestamp = inverter->timeStamp;
 
         // dc energy 
-        inverter->panels[0].energy = (toFloat(zb_buffer,offset + 50, 4) / (float)1000 / 100) * 1.66;
-        inverter->panels[1].energy = (toFloat(zb_buffer,offset + 54, 4) / (float)1000 / 100) * 1.66;
+        inverter->panels[0].energy = (toFloat(payload, 50, 4) / (float)1000 / 100) * 1.66;
+        inverter->panels[1].energy = (toFloat(payload, 54, 4) / (float)1000 / 100) * 1.66;
 
         #ifdef DEBUG
-        Serial.printf_P(PSTR("DC STATE : %02X\n"), zb_buffer[offset + 24]);
+        logf_P(PSTR("DC STATE : %02X\n"), payload[24]);
         #endif
 
         // ac voltage
-        inverter->acVoltage = toFloat(zb_buffer,offset + 34, 2) / DS3_AC_VOLTAGE_FACTOR;
+        inverter->acVoltage = toFloat(payload, 34, 2) / DS3_AC_VOLTAGE_FACTOR;
         
 
         // Calculate DC power (V×I method)
@@ -419,7 +456,7 @@ void ecu_decode_poll_answer(Inverter *inverter)
         dcPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
 
         // Calculate energy-based power if we have valid previous readings
-        inverter->timeStamp = toInt(zb_buffer,offset + 38, 2);
+        inverter->timeStamp = toInt(payload, 38, 2);
         float newEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
         int timeDiff = inverter->timeStamp - oldTimestamp;
         
@@ -446,14 +483,14 @@ void ecu_decode_poll_answer(Inverter *inverter)
         }
 
         //dc mptt 
-        inverter->dcMpttVoltage = toFloat(zb_buffer,offset + 42, 2) * DS3_DC_VOLTAGE_FACTOR;
+        inverter->dcMpttVoltage = toFloat(payload, 42, 2) * DS3_DC_VOLTAGE_FACTOR;
         // freq
-        inverter->frequency = toFloat(zb_buffer,offset + 36, 2) / 100;
+        inverter->frequency = toFloat(payload, 36, 2) / 100;
 
         // temp * 0.0198 - 23.84
-        inverter->temperature = toFloat(zb_buffer,offset + 48, 2) * 0.0198 - 23.84;
+        inverter->temperature = toFloat(payload, 48, 2) * 0.0198 - 23.84;
 
-        inverter->status = zb_buffer[offset + 24];
+        inverter->status = payload[24];
         inverter->energy = newEnergy;
 
         
@@ -461,7 +498,7 @@ void ecu_decode_poll_answer(Inverter *inverter)
     }
     else 
     {
-        Serial.println("Missing data");
+        log_line("Missing data");
     }
     inverter->polled = true;
     #ifdef DEBUG

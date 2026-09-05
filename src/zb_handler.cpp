@@ -30,11 +30,11 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     uint8_t chunk = 0;
     uint8_t crc = 0;
     crc ^= (buffer_len - 2);
-    Serial.print("S : ");
+    log("S : ");
 
 #ifdef DEBUG
-    Serial.print(F("FE"));
-    Serial.printf("-%02X", buffer_len - 2);
+    log(F("FE"));
+    logf("-%02X", buffer_len - 2);
 #endif
 
     // serial->flush();
@@ -49,14 +49,14 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     {
         chunk = buffer[i];
 #ifdef DEBUG
-        Serial.printf("-%02X", chunk);
+        logf("-%02X", chunk);
 #endif
         serial->write(chunk);
         crc ^= chunk;
     }
 #ifdef DEBUG
-    Serial.printf("-%02X", crc);
-    Serial.println();
+    logf("-%02X", crc);
+    log_line("");
 #endif
     serial->write(crc);
 
@@ -64,7 +64,7 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     serial->listen();
 }
 
-uint8_t zigbee_recv(uint8_t *buffer)
+uint16_t zigbee_recv(uint8_t *buffer)
 {
 
     uint16_t index = 0;
@@ -114,9 +114,9 @@ uint8_t zigbee_recv(uint8_t *buffer)
 
 #ifdef DEBUG
             if (index == 0)
-                Serial.printf("%02X", chunk);
+                logf("%02X", chunk);
             else
-                Serial.printf("-%02X", chunk);
+                logf("-%02X", chunk);
 #endif
 
             index++;
@@ -131,9 +131,35 @@ uint8_t zigbee_recv(uint8_t *buffer)
     }
 
 #ifdef DEBUG
-    Serial.printf("  |  index : %d  |  size : %d ", index, size - 5);
-    Serial.println();
+    logf_P(PSTR("  |  index : %d  |  size : %d "), index, size - 5);
+    log_line("");
 #endif
+
+    if (index == 0)
+    {
+        return 0; // nothing came in, not an error
+    }
+
+    // A truncated frame silently shifts every field past the missing byte, so
+    // the caller would decode neighbouring bytes as valid measurements.
+    // buffer[1] announces the payload length, total frame is that + 5.
+    if (index < 5 || index != size)
+    {
+        logf_P(PSTR("incomplete frame: %d/%d bytes - dropped\n"), index, size);
+        return 0;
+    }
+
+    // ZNP frame check sequence: XOR over LEN, CMD0, CMD1 and DATA
+    uint8_t fcs = 0;
+    for (uint16_t i = 1; i < index - 1; i++)
+    {
+        fcs ^= buffer[i];
+    }
+    if (fcs != buffer[index - 1])
+    {
+        logf_P(PSTR("bad checksum: %02X != %02X - frame dropped\n"), fcs, buffer[index - 1]);
+        return 0;
+    }
 
     return index;
 }

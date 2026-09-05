@@ -39,6 +39,7 @@ typedef struct
     float acVoltage = 0; //v 
     float dcMpttVoltage = 0; // V
     uint8_t status = 0;
+    uint8_t signalQuality = 0; // link quality, 0-100
     PanelData panels[4];
     uint8_t _poll_command[31];
     
