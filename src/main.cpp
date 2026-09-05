@@ -8,13 +8,13 @@
 #include <webserver.h>
 #include <mqtt.h>
 
-#define MAX_INVERTER_COUNT 3
 #define POLL_INTERVAL 10
 Config config;
 
 Inverter inverters[MAX_INVERTER_COUNT];
 bool all_Paired = true;
-int8_t loopCount = 0;
+uint8_t inverterCount = 0;
+uint32_t loopCount = 0;
 
 void setup()
 {
@@ -26,7 +26,7 @@ void setup()
 
   bool connected = false;
   // if wifi credentials are detected
-  if (config.wifi_ssid > 0)
+  if (config.wifi_ssid[0] != 0)
   {
     wifi_setup(config.wifi_ssid, config.wifi_password);
     connected = wifi_connect(5);
@@ -39,27 +39,37 @@ void setup()
   else
   {
     mqtt_begin(config.mqtt_url, config.mqtt_port);
-    loadInverterConfig(inverters);
-    ecu_begin();
-#ifdef DEBUG
-    Serial.println(F("Setup OK - initializing"));
-#endif
-    ecu_initialize();
+    inverterCount = loadInverterConfig(inverters);
 
-    for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
+    if (inverterCount == 0)
     {
-      if (inverters[i].iD[0] != 0 && inverters[i].iD[1] != 0)
-      {
-        inverters[i].idx = i;
-        inverters[i].paired = true;
-      }
-      else
-        all_Paired = false;
+      // nothing to talk to: leave the zigbee coordinator down and let the user
+      // fill in the inverter config through the web UI
+      log_line(F("no inverter configured - zigbee, pairing and polling disabled"));
     }
-
-    if (all_Paired)
+    else
     {
-      ecu_noop();
+      ecu_begin();
+#ifdef DEBUG
+      log_line(F("Setup OK - initializing"));
+#endif
+      ecu_initialize();
+
+      for (uint8_t i = 0; i < inverterCount; i++)
+      {
+        if (inverters[i].iD[0] != 0 && inverters[i].iD[1] != 0)
+        {
+          inverters[i].idx = i;
+          inverters[i].paired = true;
+        }
+        else
+          all_Paired = false;
+      }
+
+      if (all_Paired)
+      {
+        ecu_noop();
+      }
     }
   }
 
@@ -71,10 +81,18 @@ void setup()
 
 void loop()
 {
+  // nothing configured: only keep the web UI alive so inverters can be added
+  if (inverterCount == 0)
+  {
+    webserver_loop();
+    delay(1000);
+    return;
+  }
+
   if (!all_Paired)
   {
     all_Paired = true;
-    for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
+    for (uint8_t i = 0; i < inverterCount; i++)
     {
       if (!inverters[i].paired)
       {
@@ -96,7 +114,7 @@ void loop()
     {
       ecu_heart_beat();
 
-      for (uint8_t i = 0; i < MAX_INVERTER_COUNT; i++)
+      for (uint8_t i = 0; i < inverterCount; i++)
       {
         ecu_poll(&inverters[i]);
 
@@ -105,17 +123,17 @@ void loop()
           mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
         }
       }
-      log_total(inverters, MAX_INVERTER_COUNT);
+      log_total(inverters, inverterCount);
     }
     else 
     {
-      Serial.printf("Polling : %d/%d", loopCount, POLL_INTERVAL);
+      logf("Polling : %u/%u\n", loopCount % POLL_INTERVAL, POLL_INTERVAL);
     }
   }
 
 //   ecu.ping();
 #ifdef DEBUG
-  printf("[Server Connected] : %s\n", getIP());
+  logf_P(PSTR("[Server Connected] : %s\n"), getIP());
 #endif
   webserver_loop();
 

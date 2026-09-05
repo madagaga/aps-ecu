@@ -5,7 +5,7 @@
 #include <logger.h>
 #include <config.h>
 
-int16_t indexOf(const char *data, const char pattern,int startIndex);
+int16_t indexOf(const char *data, uint16_t data_len, const char pattern, int startIndex);
 
 int16_t indexOf(const uint8_t *data, uint16_t data_len, const uint8_t *pattern, uint8_t pattern_len);
 void convertToByteArray(const char *hexString, uint8_t *destination);

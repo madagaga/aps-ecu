@@ -10,7 +10,8 @@
 
 #define MAX_CONFIG_LINE_SIZE 255
 #define CONFIG_PATH "/config.txt"
-#define INVERTER_PATH "/inverters_config.txt"
+#define INVERTER_PATH "/inverter_config.txt"
+#define MAX_INVERTER_COUNT 3
 
 
 typedef struct 
@@ -27,6 +28,8 @@ typedef struct
 
 
 void loadConfig(Config *config);
-void loadInverterConfig(Inverter inverter[3]);
+// Returns the number of inverters actually configured (0 when the file is
+// missing or holds no usable entry).
+uint8_t loadInverterConfig(Inverter inverter[MAX_INVERTER_COUNT]);
 
 #endif

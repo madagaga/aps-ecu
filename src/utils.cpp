@@ -1,8 +1,13 @@
 #include <utils.h>
 
-int16_t indexOf(const char *data, const char pattern, int startIndex)
-{   
-    for (int i = startIndex; i < (startIndex + MAX_CONFIG_LINE_SIZE); i++)
+int16_t indexOf(const char *data, uint16_t data_len, const char pattern, int startIndex)
+{
+    if (startIndex < 0)
+    {
+        return -1;
+    }
+
+    for (int i = startIndex; i < data_len; i++)
     {
         if (data[i] == pattern)
         {
@@ -19,7 +24,7 @@ int16_t indexOf(const uint8_t *data, uint16_t data_len, const uint8_t *pattern, 
         return -2; // No match possible if data is shorter than the pattern
     }
 
-    for (uint8_t i = 0; i <= data_len - pattern_len; ++i)
+    for (uint16_t i = 0; i <= (uint16_t)(data_len - pattern_len); ++i)
     {
         if (memcmp(&data[i], pattern, pattern_len) == 0)
         {
