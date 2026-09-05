@@ -26,6 +26,11 @@
  * zigbee_recv() only returns frames whose LEN and FCS check out, so these
  * accessors are safe to use on whatever it hands back.
  */
+// zigbee_recv() return value for a frame that failed validation. Distinct
+// from 0, which means "nothing arrived": a caller draining the port must
+// keep reading after a bad frame, not stop.
+#define ZB_RECV_INVALID 0xFFFF
+
 #define ZNP_LEN(f)  ((f)[1])
 #define ZNP_CMD(f)  ((uint16_t)(((f)[2] << 8) | (f)[3]))
 #define ZNP_DATA(f) ((f) + 4)

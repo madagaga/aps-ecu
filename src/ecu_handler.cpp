@@ -50,7 +50,7 @@ void ecu_initialize()
     #endif
     // we start with a hard reset of the zb module
     zigbee_reset();
-    uint8_t index = 0;
+    uint16_t index = 0;
 #ifdef DEBUG
     log_line(F("****** Init ******"));
 #endif
@@ -212,6 +212,10 @@ void ecu_pair(Inverter *inverter)
         {
             memset(&zb_buffer, 0, sizeof(zb_buffer));
             response_size = zigbee_recv(zb_buffer);
+            if (response_size == ZB_RECV_INVALID)
+            {
+                continue;
+            }
             if (!inverter->paired)
             {
                 // check if response contains inverter serial
@@ -249,6 +253,7 @@ void ecu_poll(Inverter *inverter)
     log_line(F("****** Polling ******"));
     #endif
     uint16_t index = 0;
+    inverter->polled = false;
     if (inverter->_poll_command[0] == 0)
     {
         #ifdef DEBUG
@@ -267,6 +272,13 @@ void ecu_poll(Inverter *inverter)
     index = zigbee_recv(zb_buffer);
     while (index != 0)
     {
+        if (index == ZB_RECV_INVALID)
+        {
+            memset(&zb_buffer, 0, sizeof(zb_buffer));
+            index = zigbee_recv(zb_buffer);
+            continue;
+        }
+
         const uint16_t cmd = ZNP_CMD(zb_buffer);
         const uint8_t *data = ZNP_DATA(zb_buffer);
         const uint8_t status = ZNP_LEN(zb_buffer) > 0 ? data[0] : 0xFF;

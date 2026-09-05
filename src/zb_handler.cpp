@@ -146,7 +146,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
     if (index < 5 || index != size)
     {
         logf_P(PSTR("incomplete frame: %d/%d bytes - dropped\n"), index, size);
-        return 0;
+        return ZB_RECV_INVALID;
     }
 
     // ZNP frame check sequence: XOR over LEN, CMD0, CMD1 and DATA
@@ -158,7 +158,7 @@ uint16_t zigbee_recv(uint8_t *buffer)
     if (fcs != buffer[index - 1])
     {
         logf_P(PSTR("bad checksum: %02X != %02X - frame dropped\n"), fcs, buffer[index - 1]);
-        return 0;
+        return ZB_RECV_INVALID;
     }
 
     return index;
