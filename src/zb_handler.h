@@ -31,6 +31,14 @@
 // keep reading after a bad frame, not stop.
 #define ZB_RECV_INVALID 0xFFFF
 
+// A ZNP frame is at most LEN(255) + 5. Reading beyond that is pointless and
+// would run past the caller's buffer.
+#define ZB_MAX_FRAME 260
+
+// How long to wait for a frame before giving up.
+#define ZB_RECV_TIMEOUT_MS 1500
+
+
 #define ZNP_LEN(f)  ((f)[1])
 #define ZNP_CMD(f)  ((uint16_t)(((f)[2] << 8) | (f)[3]))
 #define ZNP_DATA(f) ((f) + 4)
@@ -62,6 +70,6 @@ void zigbee_reset();
 void zigbee_flush();
 
 void zigbee_send(const uint8_t *buffer, uint8_t buffer_len);
-uint16_t zigbee_recv(uint8_t *buffer);
+uint16_t zigbee_recv(uint8_t *buffer, uint16_t timeout_ms = ZB_RECV_TIMEOUT_MS);
 
 #endif

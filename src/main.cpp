@@ -8,13 +8,21 @@
 #include <webserver.h>
 #include <mqtt.h>
 
-#define POLL_INTERVAL 10
+#define POLL_INTERVAL_MS 10000
 Config config;
 
 Inverter inverters[MAX_INVERTER_COUNT];
 bool all_Paired = true;
 uint8_t inverterCount = 0;
-uint32_t loopCount = 0;
+uint32_t lastPoll = 0;
+
+// Serviced between inverters rather than during a transfer: doing it while a
+// frame is in flight costs received bytes.
+void serviceNetwork()
+{
+  webserver_loop();
+  mqtt_loop();
+}
 
 void setup()
 {
@@ -81,11 +89,12 @@ void setup()
 
 void loop()
 {
+  serviceNetwork();
+
   // nothing configured: only keep the web UI alive so inverters can be added
   if (inverterCount == 0)
   {
-    webserver_loop();
-    delay(1000);
+    yield();
     return;
   }
 
@@ -107,42 +116,32 @@ void loop()
     //  save config
 
     ecu_noop();
+    return;
   }
-  else
+
+  // millis() arithmetic on uint32_t wraps correctly, no rollover special case
+  if (millis() - lastPoll < POLL_INTERVAL_MS)
   {
-    if (loopCount % POLL_INTERVAL == 0)
-    {
-      ecu_heart_beat();
+    yield();
+    return;
+  }
+  lastPoll = millis();
 
-      for (uint8_t i = 0; i < inverterCount; i++)
-      {
-        ecu_poll(&inverters[i]);
+  ecu_heart_beat();
 
-        if (inverters[i].paired && inverters[i].polled)
-        {
-          mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
-        }
-      }
-      log_total(inverters, inverterCount);
-    }
-    else 
+  for (uint8_t i = 0; i < inverterCount; i++)
+  {
+    serviceNetwork();
+    ecu_poll(&inverters[i]);
+
+    if (inverters[i].paired && inverters[i].polled)
     {
-      logf("Polling : %u/%u\n", loopCount % POLL_INTERVAL, POLL_INTERVAL);
+      mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
     }
   }
+  log_total(inverters, inverterCount);
 
-//   ecu.ping();
 #ifdef DEBUG
   logf_P(PSTR("[Server Connected] : %s\n"), getIP());
 #endif
-  webserver_loop();
-
-  mqtt_loop();
-
-  
-    
-
-  delay(1000);
-
-  loopCount++;
 }

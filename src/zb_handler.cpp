@@ -1,6 +1,17 @@
 #include <zb_handler.h>
 
 static EspSoftwareSerial::UART *serial;
+// Measured: running the web server and MQTT client while a frame is in flight
+// pushed the frame rejection rate from 28% to 49%. The software UART buffers in
+// an ISR and any latency there costs bytes, so these windows only yield().
+static void zigbee_pause(uint16_t ms)
+{
+    const uint32_t deadline = millis() + ms;
+    while ((int32_t)(millis() - deadline) < 0)
+    {
+        yield();
+    }
+}
 
 void zigbee_begin()
 {
@@ -62,74 +73,45 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
 #endif
     serial->write(crc);
 
-    delay(500);
     serial->listen();
+    zigbee_pause(500);
 }
 
-uint16_t zigbee_recv(uint8_t *buffer)
+uint16_t zigbee_recv(uint8_t *buffer, uint16_t timeout_ms)
 {
-
     uint16_t index = 0;
-    uint16_t size = 255;
-    uint8_t chunk;
+    uint16_t size = ZB_MAX_FRAME; // real length is known once byte 1 arrives
+    const uint32_t deadline = millis() + timeout_ms;
+
 #ifdef DEBUG_FRAMES
     log(F("R : "));
 #endif
-    uint8_t tries = 0;
-    while (serial->available() == 0 && tries < 3)
-    {
-        delay(500); // we wait if there comes more data
-        tries++;
-#ifdef DEBUG_FRAMES
-        log(F("."));
-#endif
-    }
-    if (tries == 3)
-        size = 0;
 
     while (index < size)
     {
-        if (serial->available() == 0 && tries < 3)
+        if (serial->available() == 0)
         {
-
-            delay(100);
-            tries++;
-#ifdef DEBUG_FRAMES
-            log(F("."));
-#endif
+            if ((int32_t)(millis() - deadline) >= 0)
+            {
+                break; // timed out
+            }
+            yield();
             continue;
         }
 
-        if (tries == 3)
-            break;
+        const uint8_t chunk = serial->read();
+        buffer[index] = chunk;
 
-        if (index < size)
+        // ZNP announces the payload length in byte 1; total frame is that + 5
+        if (index == 1)
         {
-            chunk = serial->read();
-            buffer[index] = chunk;
-
-            // size is buffer len without command 2 bytes and crc 1 byte
-            if (index == 1)
-            {
-                size = chunk + 5;
-            }
+            size = chunk + 5;
+        }
 
 #ifdef DEBUG_FRAMES
-            if (index == 0)
-                logf("%02X", chunk);
-            else
-                logf("-%02X", chunk);
+        logf(index == 0 ? "%02X" : "-%02X", chunk);
 #endif
-
-            index++;
-        }
-        else
-        {
-#ifdef DEBUG_FRAMES
-            log_line("Inverter::_read");
-#endif
-            serial->read();
-        }
+        index++;
     }
 
 #ifdef DEBUG
