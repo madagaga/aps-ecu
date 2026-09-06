@@ -22,5 +22,5 @@ void ecu_noop();
 void ecu_pair(Inverter *inverter);
 
 void ecu_poll(Inverter *inverter);
-void ecu_decode_poll_answer(Inverter *inverter);
+void ecu_decode_poll_answer(Inverter *inverter, const uint8_t *payload, uint8_t payload_len);
 #endif

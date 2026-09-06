@@ -1,4 +1,12 @@
 #include <mqtt.h>
+#include <PubSubClient.h>
+#include <wifi.h>
+#include <logger.h>
+
+// Single instance, owned by this translation unit. Defining these in the
+// header gave every includer its own unused copy.
+static WiFiClient espClient;
+static PubSubClient mqttClient(espClient);
 
 void mqtt_connect()
 {
@@ -6,11 +14,11 @@ void mqtt_connect()
     {
         if (mqttClient.connect(MQTT_CLIENT_ID))
         {
-            Serial.println(F("mqtt connected"));
+            log_line(F("mqtt connected"));
         }
         else
         {
-            Serial.printf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
+            logf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
         }
     }
 }
@@ -18,6 +26,12 @@ void mqtt_connect()
 void mqtt_begin(const char *mqtt_url, int mqtt_port)
 {
     mqttClient.setServer(mqtt_url, mqtt_port);
+    // default is 256 bytes; the payload alone is ~226 and grows if the panel
+    // block is ever enabled
+    if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE))
+    {
+        log_line(F("mqtt buffer allocation failed"));
+    }
     mqtt_connect();
 }
 
@@ -25,13 +39,15 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
 {
     if (!mqttClient.connected())
     {
-        Serial.println(F("mqtt not connected"));
+        log_line(F("mqtt not connected"));
 
         return;
     }
 
-    char text[512];
-    sprintf(text, "{"
+    // static: keeps the scratch buffer off the 4KB stack, since
+    // mqtt_publish is called from loop()
+    static char text[MQTT_BUFFER_SIZE];
+    snprintf(text, sizeof(text), "{"
                   "\"type\":\"inverter\","
                   "\"serial\":\"%02X-%02X-%02X-%02X-%02X-%02X\","
                   "\"id\":\"%02X-%02X\","
@@ -43,7 +59,7 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
                   "\"temperature\":%.2f,"
                   "\"voltage\":%.2f,"
                   "\"energy\":%.2f,"
-                  "\"mac\":\"%s\""
+                  "\"deviceID\":\"%s\""
                   "}",
             Inverter->serial[0], Inverter->serial[1], Inverter->serial[2], Inverter->serial[3], Inverter->serial[4], Inverter->serial[5],
             Inverter->iD[0], Inverter->iD[1],
@@ -57,10 +73,33 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
             Inverter->energy,
             getMAC());
 
-    Serial.println(text);
+    // include panels data: format [ array of panels]
+    // strcat(text, ",\"panels\":[");
+    // for (int i = 0; i < 4; i++)
+    // {
+    //     // skip panel if not present
+    //     if(Inverter->panels[i].present == false)
+    //     {
+    //         continue;
+    //     }
+    //     if (i > 0)
+    //     {
+    //         strcat(text, ",");
+    //     }
+    //     char panelText[128];
+    //     sprintf(panelText, "{\"dcVoltage\":%.2f,\"dcCurrent\":%.2f,\"energy\":%.2f}",
+    //             Inverter->panels[i].dcVoltage,
+    //             Inverter->panels[i].dcCurrent,
+    //             Inverter->panels[i].energy);
+    //     strcat(text, panelText);
+
+    // }
+    // strcat(text, "]}");
+
+    log_line(text);
 #ifdef DEBUG
     bool ret = mqttClient.publish(topic, text);
-    Serial.printf_P(PSTR("Publishin to '%s' : %i\n"),topic, ret);
+    logf_P(PSTR("Publishin to '%s' : %i\n"),topic, ret);
 #else
     mqttClient.publish(topic, text);
 #endif

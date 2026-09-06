@@ -1,0 +1,12 @@
+# Store every text file with LF in the repository and check it out with LF,
+# regardless of each developer's core.autocrlf setting.
+* text=auto eol=lf
+
+# Binary assets must never be touched.
+*.zip binary
+*.bin binary
+*.elf binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ico binary
