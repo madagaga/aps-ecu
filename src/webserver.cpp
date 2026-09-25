@@ -10,7 +10,7 @@ void handleConfig(){
   file.print(s);
   file.close();
 
-  log_line("Config updated");
+  log_line(F("Config updated"));
   server.send(200, "text/plain", "Configuration updated");
   system_restart();
 }
@@ -22,14 +22,14 @@ void handleInverterConfig(){
   file.print(s);
   file.close();
 
-  log_line("Config updated");
+  log_line(F("Config updated"));
   server.send(200, "text/plain", "Configuration updated");
   system_restart();
 }
 
 
 bool handleFileRead(String path) { // send the right file to the client (if it exists)
-  logf("handleFileRead: %s\n",path.c_str());
+  logf_P(PSTR("handleFileRead: %s\n"),path.c_str());
   if (path.endsWith("/")) path += "index.html";         // If a folder is requested, send the index file
   String contentType = path.endsWith(".html") ? "text/html" : "text/plain";            // Get the MIME type
   if (LittleFS.exists(path)) {                            // If the file exists
@@ -38,7 +38,7 @@ bool handleFileRead(String path) { // send the right file to the client (if it e
     file.close();                                       // Then close the file again
     return true;
   }
-  log_line("\tFile Not Found");
+  log_line(F("\tFile Not Found"));
   return false;                                         // If the file doesn't exist, return false
 }
 

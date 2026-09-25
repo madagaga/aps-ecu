@@ -26,7 +26,7 @@ void zigbee_reset()
     digitalWrite(ZB_RESET, LOW);
     delay(500);
     digitalWrite(ZB_RESET, HIGH);
-    log_line("zigbee module reset");
+    log_line(F("zigbee module reset"));
     delay(500);
 }
 
@@ -47,7 +47,7 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
 
 #ifdef DEBUG_FRAMES
     log(F("FE"));
-    logf("-%02X", buffer_len - 2);
+    logf_P(PSTR("-%02X"), buffer_len - 2);
 #endif
 
     // serial->flush();
@@ -62,14 +62,14 @@ void zigbee_send(const uint8_t *buffer, uint8_t buffer_len)
     {
         chunk = buffer[i];
 #ifdef DEBUG_FRAMES
-        logf("-%02X", chunk);
+        logf_P(PSTR("-%02X"), chunk);
 #endif
         serial->write(chunk);
         crc ^= chunk;
     }
 #ifdef DEBUG_FRAMES
-    logf("-%02X", crc);
-    log_line("");
+    logf_P(PSTR("-%02X"), crc);
+    log_line(F(""));
 #endif
     serial->write(crc);
 
@@ -100,6 +100,13 @@ uint16_t zigbee_recv(uint8_t *buffer, uint16_t timeout_ms)
         }
 
         const uint8_t chunk = serial->read();
+
+        // Leftovers of a frame cut short by a previous timeout would
+        // otherwise be taken for a new header: wait for the next SOF.
+        if (index == 0 && chunk != ZNP_SOF)
+        {
+            continue;
+        }
         buffer[index] = chunk;
 
         // ZNP announces the payload length in byte 1; total frame is that + 5
@@ -116,7 +123,7 @@ uint16_t zigbee_recv(uint8_t *buffer, uint16_t timeout_ms)
 
 #ifdef DEBUG
     logf_P(PSTR("R : received %d, declared %d"), index, size);
-    log_line("");
+    log_line(F(""));
 #endif
 
     if (index == 0)

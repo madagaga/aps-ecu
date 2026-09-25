@@ -100,7 +100,7 @@ function sendInverterConfiguration() {
 
     
     
-    fetch("/inverter", {
+    fetch("/inverters", {
         method: 'POST',
         body: data.join('\n')
     })

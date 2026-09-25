@@ -1,6 +1,6 @@
 #include <ecu_handler.h>
 
-static uint8_t zb_buffer[MAX_SERIAL_BUFFER_SIZE];
+static uint8_t zb_buffer[ZB_BUFFER_SIZE];
 
 void ecu_begin()
 {
@@ -139,8 +139,7 @@ bool ecu_heart_beat()
         return false;
     }
 
-    // searching the whole 512-byte buffer could match leftovers from an
-    // earlier frame
+    // searching the whole buffer could match leftovers from an earlier frame
     const int16_t index = indexOf(zb_buffer, received, ECU_ID_REVERSE, 6);
 
     if (index > -1 && index + 9 < (int16_t)received)
@@ -154,6 +153,51 @@ bool ecu_heart_beat()
         }
     }
 
+    return false;
+}
+
+/*
+ * The module answers the heartbeat even when every inverter sleeps, so a
+ * missing answer means the module (or the UART) is wedged, not that it is
+ * night. One lost frame is not enough to reset it, and a reset that does not
+ * help is not retried in a loop: each one tears the network down.
+ */
+bool ecu_check_alive()
+{
+    static uint8_t failures = 0;
+    static bool reinitialised = false;
+    static uint32_t lastReinit = 0;
+    static uint32_t backoff = ECU_WATCHDOG_BACKOFF_MIN_MS;
+
+    if (ecu_heart_beat())
+    {
+        failures = 0;
+        backoff = ECU_WATCHDOG_BACKOFF_MIN_MS;
+        return true;
+    }
+
+    if (failures < 255)
+    {
+        failures++;
+    }
+    logf_P(PSTR("heartbeat failed (%u in a row)\n"), failures);
+
+    if (failures < ECU_WATCHDOG_FAILURES)
+    {
+        return true;
+    }
+    if (reinitialised && millis() - lastReinit < backoff)
+    {
+        return false;
+    }
+
+    logf_P(PSTR("zigbee module not answering - reinitializing (next attempt in %lus at the earliest)\n"),
+           backoff / 1000);
+    ecu_initialize();
+    ecu_noop();
+    reinitialised = true;
+    lastReinit = millis();
+    backoff = backoff >= ECU_WATCHDOG_BACKOFF_MAX_MS / 2 ? ECU_WATCHDOG_BACKOFF_MAX_MS : backoff * 2;
     return false;
 }
 
@@ -175,21 +219,17 @@ bool ecu_heart_beat()
 
 */
 
-void ecu_pair(Inverter *inverter)
+bool ecu_pair(Inverter *inverter)
 {
     #ifdef DEBUG
     log_line(F("****** Pairing ******"));
-    #endif    
+    #endif
 
-    uint8_t command[40] = {0};
-    uint8_t commandIndex = 1;
-    int8_t index = -1;
-    uint16_t response_size = 0;
+    uint8_t command[39];
 
-    while (commandIndex < 5)
+    for (uint8_t step = 1; step <= 4; step++)
     {
-
-        switch (commandIndex)
+        switch (step)
         {
         case 1:
             memcpy(command, PAIR_1_COMMAND, 39);
@@ -198,14 +238,13 @@ void ecu_pair(Inverter *inverter)
             break;
 
         case 2:
-            // command 2
             memcpy(command, PAIR_2_COMMAND, 22);
             memcpy(command + 22, inverter->serial, 6);
             zigbee_send(command, 28);
             break;
 
         case 3:
-            memcpy(command, PAIR_3_COMMAND,39);
+            memcpy(command, PAIR_3_COMMAND, 39);
             memcpy(command + 22, inverter->serial, 6);
             zigbee_send(command, 39);
             break;
@@ -214,141 +253,180 @@ void ecu_pair(Inverter *inverter)
             zigbee_send(PAIR_4_COMMAND, 28);
             break;
         }
-        // read incoming
-        response_size = zigbee_recv(zb_buffer);
-        while (response_size != 0)
+
+        // every frame of the answer is checked, the first one included
+        uint16_t size;
+        while ((size = zigbee_recv(zb_buffer)) != 0)
         {
-            memset(&zb_buffer, 0, sizeof(zb_buffer));
-            response_size = zigbee_recv(zb_buffer);
-            if (response_size == ZB_RECV_INVALID)
+            if (size == ZB_RECV_INVALID || (inverter->flags & INV_PAIRED))
             {
                 continue;
             }
-            if (!inverter->paired)
-            {
-                // check if response contains inverter serial
-                #ifdef DEBUG
-                log_line(F("Checking response"));
-                #endif
-                index = indexOf(zb_buffer, response_size, inverter->serial, 6);
 
-                if (index > -1)
-                {
-                    if (zb_buffer[index + 6] != 0xFF && zb_buffer[index + 7] != 0xFF)
-                    {
-                        inverter->iD[0] = zb_buffer[index + 6];
-                        inverter->iD[1] = zb_buffer[index + 7];
-                        #ifdef DEBUG
-                    
-                        log_array(inverter->iD, 2);
-                        log_line(F(""));
-                        #endif
-                        inverter->paired = true;
-                    }
-                }
+            // the short address follows the inverter serial
+            const int16_t index = indexOf(zb_buffer, size, inverter->serial, 6);
+            if (index < 0 || index + 7 >= (int16_t)size)
+            {
+                continue;
+            }
+            if (zb_buffer[index + 6] != 0xFF && zb_buffer[index + 7] != 0xFF)
+            {
+                inverter->addr[0] = zb_buffer[index + 6];
+                inverter->addr[1] = zb_buffer[index + 7];
+                inverter->flags |= INV_PAIRED;
+                logf_P(PSTR("paired, short address %02X%02X\n"), inverter->addr[0], inverter->addr[1]);
             }
         }
-        memset(&command, 0, 40);
-        commandIndex++;
     }
 
-    memset(&command, 0, sizeof(command));
+    return inverter->flags & INV_PAIRED;
 }
 
-void ecu_poll(Inverter *inverter)
+// Frames left over from the previous exchange (late route indications, a
+// reply that came after its deadline) must not be taken for this one's.
+static void ecu_drain()
 {
-    #ifdef DEBUG
-    log_line(F("****** Polling ******"));
-    #endif
-    uint16_t index = 0;
-    inverter->polled = false;
-    if (inverter->_poll_command[0] == 0)
+    for (uint8_t i = 0; i < 8 && zigbee_recv(zb_buffer, 20) != 0; i++)
     {
-        #ifdef DEBUG
-        log_line(F("copying poll command"));
-        #endif
-        memcpy(inverter->_poll_command, POLL_1_COMMAND, 31);
-        memcpy(inverter->_poll_command + 2, inverter->iD, 2);
     }
-    zigbee_send(inverter->_poll_command, 31);
-    memset(&zb_buffer, 0, sizeof(zb_buffer));
-    #ifdef DEBUG
-    log_line(F("wait 100ms"));
-    #endif
-    delay(100);
+}
 
-    index = zigbee_recv(zb_buffer);
-    while (index != 0)
+static void ecu_send_query(const Inverter *inverter, uint8_t cmd)
+{
+    uint8_t frame[sizeof(AF_UNICAST_HEADER) + sizeof(ECU_ID_REVERSE) + APS_QUERY_LEN];
+
+    memcpy(frame, AF_UNICAST_HEADER, sizeof(AF_UNICAST_HEADER));
+    frame[AF_UNICAST_ADDR_OFFSET] = inverter->addr[0];
+    frame[AF_UNICAST_ADDR_OFFSET + 1] = inverter->addr[1];
+    frame[AF_UNICAST_LEN_OFFSET] = sizeof(ECU_ID_REVERSE) + APS_QUERY_LEN;
+    memcpy(frame + sizeof(AF_UNICAST_HEADER), ECU_ID_REVERSE, sizeof(ECU_ID_REVERSE));
+    aps_build_query(frame + sizeof(AF_UNICAST_HEADER) + sizeof(ECU_ID_REVERSE), cmd);
+
+    zigbee_send(frame, sizeof(frame));
+}
+
+typedef enum
+{
+    ECU_REPLY_OK,
+    ECU_REPLY_TIMEOUT,
+    ECU_REPLY_NO_ROUTE,
+    ECU_REPLY_REJECTED,
+    ECU_REPLY_ENCRYPTED,
+} EcuReply;
+
+/*
+ * Sends one query and waits for the matching reply. On ECU_REPLY_OK `*l2`
+ * points into zb_buffer at a validated APsystems frame (FB FB ... FE FE),
+ * valid until the next zigbee_recv().
+ *
+ * Returns as soon as the reply is in instead of waiting for the line to go
+ * quiet: with a large fleet the idle wait was most of the round.
+ */
+static EcuReply ecu_transact(Inverter *inverter, uint8_t cmd, const uint8_t **l2)
+{
+    ecu_drain();
+    ecu_send_query(inverter, cmd);
+
+    const uint32_t deadline = millis() + ECU_REPLY_BUDGET_MS;
+    while ((int32_t)(millis() - deadline) < 0)
     {
-        if (index == ZB_RECV_INVALID)
+        const uint16_t received = zigbee_recv(zb_buffer);
+        if (received == 0)
         {
-            memset(&zb_buffer, 0, sizeof(zb_buffer));
-            index = zigbee_recv(zb_buffer);
+            return ECU_REPLY_TIMEOUT;
+        }
+        if (received == ZB_RECV_INVALID)
+        {
             continue;
         }
 
-        const uint16_t cmd = ZNP_CMD(zb_buffer);
+        const uint16_t znp = ZNP_CMD(zb_buffer);
+        const uint8_t znpLen = ZNP_LEN(zb_buffer);
         const uint8_t *data = ZNP_DATA(zb_buffer);
-        const uint8_t status = ZNP_LEN(zb_buffer) > 0 ? data[0] : 0xFF;
+        const uint8_t status = znpLen > 0 ? data[0] : 0xFF;
 
-        switch (cmd)
+        switch (znp)
         {
+        case ZNP_AF_DATA_REQUEST_SRSP:
+            if (status != AF_STATUS_SUCCESS)
+            {
+                logf_P(PSTR("data request refused by the module: %02X\n"), status);
+                return ECU_REPLY_REJECTED;
+            }
+            break;
+
+        // the original code read this response as "unreachable"; kept as-is
+        case ZNP_AF_DATA_REQUEST_EXT_SRSP:
+            #ifdef DEBUG
+            log_line(F("Pair unreachable"));
+            #endif
+            return ECU_REPLY_REJECTED;
+
         case ZNP_AF_DATA_CONFIRM:
             if (status == AF_STATUS_NO_ROUTE)
             {
                 #ifdef DEBUG
                 log_line(F("No route"));
                 #endif
-                inverter->polled = false;
-                return;
+                return ECU_REPLY_NO_ROUTE;
             }
-            #ifdef DEBUG
-            log_line(F("Data confirm"));
-            #endif
-            break;
-
-        // the original code read this response as "unreachable"; kept as-is,
-        // the ZNP status byte itself says success
-        case ZNP_AF_DATA_REQUEST_EXT_SRSP:
-            #ifdef DEBUG
-            log_line(F("Pair unreachable"));
-            #endif
-            inverter->polled = false;
-            return;
-
-        case ZNP_AF_DATA_REQUEST_SRSP:
-            #ifdef DEBUG
-            log_line(F("Data request success"));
-            #endif
             break;
 
         case ZNP_AF_INCOMING_MSG:
-            #ifdef DEBUG
-            log_line(F("incomming messsage"));
-            #endif
-            if (ZNP_LEN(zb_buffer) < AF_HEADER_SIZE)
+        {
+            if (znpLen < AF_HEADER_SIZE)
             {
                 log_line(F("truncated AF header - ignored"));
                 break;
             }
             // a reply from another inverter would otherwise be decoded into
             // this one's measurements
-            if (AF_SRC_ADDR(data)[0] != inverter->iD[0] ||
-                AF_SRC_ADDR(data)[1] != inverter->iD[1])
+            if (AF_SRC_ADDR(data)[0] != inverter->addr[0] ||
+                AF_SRC_ADDR(data)[1] != inverter->addr[1])
             {
-                logf_P(PSTR("reply from %02X-%02X while polling %02X-%02X - ignored\n"),
+                logf_P(PSTR("reply from %02X%02X while polling %02X%02X - ignored\n"),
                        AF_SRC_ADDR(data)[0], AF_SRC_ADDR(data)[1],
-                       inverter->iD[0], inverter->iD[1]);
+                       inverter->addr[0], inverter->addr[1]);
                 break;
             }
-            if (AF_HEADER_SIZE + AF_PAYLOAD_LEN(data) > ZNP_LEN(zb_buffer))
+            const uint8_t payloadLen = AF_PAYLOAD_LEN(data);
+            if (AF_HEADER_SIZE + payloadLen > znpLen)
             {
                 log_line(F("AF payload longer than frame - ignored"));
                 break;
             }
-            inverter->signalQuality = (AF_LINK_QUALITY(data) * 100) / 255;
-            ecu_decode_poll_answer(inverter, AF_PAYLOAD(data), AF_PAYLOAD_LEN(data));
-            break;
+
+            // payload = inverter serial (6) + APsystems frame
+            const uint8_t *payload = AF_PAYLOAD(data);
+            if (payloadLen < 7 || memcmp(payload, inverter->serial, 6) != 0)
+            {
+                log_line(F("reply without this inverter's serial - ignored"));
+                break;
+            }
+
+            inverter->lqi = AF_LINK_QUALITY(data);
+
+            if (aps_is_encrypted(payload[6]))
+            {
+                if (!(inverter->flags & INV_ENCRYPTED))
+                {
+                    log_line(F("inverter replies with AES encrypted frames - not supported"));
+                }
+                inverter->flags |= INV_ENCRYPTED;
+                return ECU_REPLY_ENCRYPTED;
+            }
+            inverter->flags &= ~INV_ENCRYPTED;
+
+            const ApsL2Status l2Status = aps_check_l2(payload + 6, payloadLen - 6);
+            if (l2Status != APS_L2_OK)
+            {
+                logf_P(PSTR("bad APsystems frame (error %u) - dropped\n"), l2Status);
+                break;
+            }
+
+            *l2 = payload + 6;
+            return ECU_REPLY_OK;
+        }
 
         // unsolicited, and the CC2530 sends ZDO_SRC_RTG_IND twice per poll
         case ZNP_ZDO_STATE_CHANGE_IND:
@@ -357,177 +435,70 @@ void ecu_poll(Inverter *inverter)
 
         default:
             #ifdef DEBUG
-            logf_P(PSTR("unhandled ZNP command %04X\n"), cmd);
+            logf_P(PSTR("unhandled ZNP command %04X\n"), znp);
             #endif
             break;
         }
-
-        memset(&zb_buffer, 0, sizeof(zb_buffer));
-        index = zigbee_recv(zb_buffer);
     }
-}
-/* from yc600 
-# 000-104: len 105: APsystems DS3-S ZigBee af_incoming_msg for af_data_request FBFB06BB000000000000C1FEFE
-# 000-005: len 06: 0x70 0x20 0x00 0xaa 0xbb 0xcc : inverter serial number
-# 006-007: len 02: 0xfb 0xfb           : tag_start
-# 008-008: len 01: 0x5c                : datalen (without sum data)
-# 009-010: len 02: 0xbb 0xbb           : static09
-# 011-011: len 01: 0x20                : version_patch?
-# 012-012: len 01: 0x00                : static12
-# 013-013: len 01: 0x02                : version_minor?
-# 014-014: len 01: 0x01                : version_major?
-# 015-021: len 07: 0x0f 0xff 0xff 0x00 0x00 0x00 0x00 : static15
-# 022-022: len 01: 0x00                : unk22       : 0x00 (default), 0x01 (overload?), 0x80 (startup?)
-# 023-023: len 01: 0x00                : unk23       : 0x00 (default), 0x,02 (???), 0x40 (short after startup)
-# 024-024: len 01: 0x00                : unk24       : 0x00 (default), 0x0a (startup/shutdown?), 0x20 (DC1 missing), 0x80 (DC2 missing), 0xaa (no power?)
-# 025-025: len 01: 0x00                : unk25       : 0x00 (default), 0xaa (startup/shutdown?)
-# 026-027: len 02: 0x07 0xcf           : DC1 voltage : V (raw / 48) confirm by measurement
-# 028-029: len 02: 0x01 0x96           : DC2 voltage : V (raw / 48) confirm by measurement
-# 030-031: len 02: 0x00 0xb3           : DC1 current : A (raw / 80) confirm by measurement
-# 032-033: len 02: 0x00 0x01           : DC2 current : A (raw / 80) confirm by measurement
-# 034-035: len 02: 0x03 0x75           : AC Voltage  : V (raw / 3.75?)
-# 036-037: len 02: 0x13 0x87           : AC Freq     : Hz (raw / 100)
-# 038-039: len 02: 0x4f 0xc8           : uptime      : seconds (counter reset after 43200 will reset DC* energy also)
-# 040-041: len 02: 0x00 0x4b           : AC power    : W (max seen 651 W)
-# 042-043: len 02: 0x00 0x30           : DC mppt?    : V (24 until 66)
-# 044-045: len 02: 0xff 0xff           : static44
-# 046-047: len 02: 0x05 0x36           : unk46       : 0x0021 (at starting), 0x055a[1370] (max seen), 0x02fc (ending)
-# 048-049: len 02: 0x08 0xd5           : temperature : °C  (raw / 100?)
-# 050-053: len 04: 0x01 0x27 0x67 0xae : DC1 energy  : Wh (raw / 65535)
-# 054-057: len 04: 0x00 0x00 0x58 0x1b : DC2 energy  : Wh (raw / 65535)
-# 058-058: len 01: 0x00                : unk58       : 0x00 (both panel power generate), 0x02 (under/overload?), 0x03 (no power generate), 0x04 (???), 0x05 (only DC2 power generate), 0x06 (only DC1 power generate), 0x0b (boot up?), 0x0c (boot up?)
-# 059-100: len 42: 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff 0xff : static59
-# 101-102: len 02: 0x38 0x3c           : sum (008-100)
-# 103-104: len 02: 0xfe 0xfe           : tag_end
-*/
 
-/* from DS3 
-ignore the first 21
-0-13  : len 14 : FE 7D 44 81 00 00 06 01 76 03 14 14 00 : Header
-14-19 : len 6  : 73 00 CE 16 01 00                      : Unknown Field 1
-20-31 : len 12 : 69 70 30 00 08 08 35 FB FB 5C BB BB    : Serial Number (703000080835)
-32-51 : len 20 : 20 00 03 00 0F FF FF 00 00 00 00 00 00 : Unknown Field 2
-52-53 : len 2  : 06 B6                                 : DC Voltage Panel 2 (DCV2)
-54-55 : len 2  : 06 B4                                 : DC Voltage Panel 1 (DCV1)
-56-57 : len 2  : 00 1E                                 : DC Voltage Panel 3 (DCV3)
-58-59 : len 2  : 00 29                                 : DC Voltage Panel 4 (DCV4)
-60-61 : len 2  : 03 7F                                 : AC Voltage (ACV)
-62-63 : len 2  : 13 89                                 : Frequency
-64-67 : len 4  : 04 04 00 15                           : Timestamp (4 bytes)
-68-71 : len 4  : 00 1D FF FF                           : Unknown Field 3
-72-75 : len 4  : 04 F4 0A 2A                           : Energy 1
-76-79 : len 4  : 00 03 B1 FD                           : Energy 2
-80-83 : len 4  : 00 04 D8 16                           : Unknown Field 4
-84-143: len 60 : FF FF FF ... FF                       : Unknown Field (Padding or Metadata)
-144-147: len 4 : 37 B9 FE FF                           : Footer
-*/
-// `payload` points at the APsystems data carried by an AF_INCOMING_MSG, so every
-// offset below is relative to the measurement block itself, not to the raw frame.
-void ecu_decode_poll_answer(Inverter *inverter, const uint8_t *payload, uint8_t payload_len)
+    return ECU_REPLY_TIMEOUT;
+}
+
+bool ecu_identify(Inverter *inverter)
+{
+    inverter->flags |= INV_ID_TRIED;
+
+    const uint8_t *l2 = NULL;
+    if (ecu_transact(inverter, APS_CMD_INFO, &l2) != ECU_REPLY_OK)
+    {
+        return false;
+    }
+
+    const uint8_t model = aps_decode_info(l2);
+    if (model == 0)
+    {
+        logf_P(PSTR("unrecognised info reply: len %02X cmd %02X\n"), l2[2], APS_L2_CMD(l2));
+        return false;
+    }
+
+    inverter->model = model;
+    logf_P(PSTR("inverter %02X%02X: model %02X%s\n"), inverter->addr[0], inverter->addr[1], model,
+           aps_family(model) == APS_FAMILY_UNKNOWN ? " (unknown)" : "");
+    return true;
+}
+
+EcuPollResult ecu_poll(Inverter *inverter, Reading *reading)
 {
     #ifdef DEBUG
-    log_line(F("decode poll answer"));
+    log_line(F("****** Polling ******"));
     #endif
 
-    // the DS3 block is read up to byte 57 (energy 2 ends at 54 + 4)
-    if (payload_len < 58)
+    const uint8_t *l2 = NULL;
+    if (ecu_transact(inverter, APS_CMD_TELEMETRY, &l2) == ECU_REPLY_OK)
     {
-        logf_P(PSTR("payload too short: %d bytes - ignored\n"), payload_len);
-        return;
-    }
+        // it answered: online, whether or not the reply can be decoded
+        inverter->missed = 0;
+        inverter->flags |= INV_ONLINE;
 
-    // 006 007 is tag start
-    if (payload[6] != 0xFB || payload[7] != 0xFB)
-    {
-        #ifdef DEBUG
-        log_line(F("No tag found"));
-        #endif
-        return;
-    }
-
-    inverter->polled = false;
-    if (inverter->invType == DS3) // DS3
-    {
-        #ifdef DEBUG
-        log_line(F("DS3 inverter"));
-        #endif
-
-        // dc voltage
-        inverter->panels[0].dcVoltage = toFloat(payload, 26, 2) * DS3_DC_VOLTAGE_FACTOR;
-        inverter->panels[1].dcVoltage = toFloat(payload, 28, 2) * DS3_DC_VOLTAGE_FACTOR;
-
-        // dc current
-        inverter->panels[0].dcCurrent = toFloat(payload, 30, 2) * DS3_DC_CURRENT_FACTOR;
-        inverter->panels[1].dcCurrent = toFloat(payload, 32, 2) * DS3_DC_CURRENT_FACTOR;
-
-        // Save old energy and timestamp
-        float oldEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
-        int oldTimestamp = inverter->timeStamp;
-
-        // dc energy 
-        inverter->panels[0].energy = (toFloat(payload, 50, 4) / (float)1000 / 100) * 1.66;
-        inverter->panels[1].energy = (toFloat(payload, 54, 4) / (float)1000 / 100) * 1.66;
-
-        #ifdef DEBUG
-        logf_P(PSTR("DC STATE : %02X\n"), payload[24]);
-        #endif
-
-        // ac voltage
-        inverter->acVoltage = toFloat(payload, 34, 2) / DS3_AC_VOLTAGE_FACTOR;
-        
-
-        // Calculate DC power (V×I method)
-        float dcPower = inverter->panels[0].dcVoltage * inverter->panels[0].dcCurrent;
-        dcPower += inverter->panels[1].dcVoltage * inverter->panels[1].dcCurrent;
-
-        // Calculate energy-based power if we have valid previous readings
-        inverter->timeStamp = toInt(payload, 38, 2);
-        float newEnergy = inverter->panels[0].energy + inverter->panels[1].energy;
-        int timeDiff = inverter->timeStamp - oldTimestamp;
-        
-        if (oldTimestamp > 0 && timeDiff > 0) {
-            float energyDiff = newEnergy - oldEnergy;
-            
-            // Only update if energy increased (avoid negative power on reset)
-            if (energyDiff > 0) {
-                // Convert energy diff (Wh) to power (W) using time diff (seconds)
-                inverter->acPower = (energyDiff / timeDiff) * 3600;
-            } else {
-                // Fallback to DC power calculation
-                inverter->acPower = dcPower;
-            }
-        } else {
-            // First reading or timestamp reset, use DC power
-            inverter->acPower = dcPower;
-        }
-        
-        // Cap power at 1000W
-        if(inverter->acPower > 1000)
+        if (aps_decode_telemetry(inverter->model, l2, reading))
         {
-            inverter->acPower = 0;
+            return ECU_POLL_OK;
         }
-
-        // freq
-        inverter->frequency = toFloat(payload, 36, 2) / 100;
-
-        // temp * 0.0198 - 23.84
-        inverter->temperature = toFloat(payload, 48, 2) * 0.0198 - 23.84;
-
-        inverter->status = payload[24];
-        inverter->energy = newEnergy;
-
-        
-        
+        logf_P(PSTR("no decoder for model %02X, reply %02X\n"), inverter->model, APS_L2_CMD(l2));
+        return ECU_POLL_UNSUPPORTED;
     }
-    else 
+
+    if (inverter->missed < 255)
     {
-        log_line("Missing data");
+        inverter->missed++;
     }
-    inverter->polled = true;
-    #ifdef DEBUG
-    log_inverter(inverter);
-    #endif
-
+    if (inverter->missed == ECU_OFFLINE_AFTER && (inverter->flags & INV_ONLINE))
+    {
+        // identify again when it comes back: it may have been replaced
+        inverter->flags &= ~(INV_ONLINE | INV_ID_TRIED);
+        return ECU_POLL_WENT_OFFLINE;
+    }
+    return ECU_POLL_FAILED;
 }
 
 void ecu_noop()

@@ -9,12 +9,19 @@
 #include <mqtt.h>
 
 #define POLL_INTERVAL_MS 10000
+// An inverter that does not pair (wrong serial, not installed yet) must not
+// stop the others from being polled: pairing is retried at this pace.
+#define PAIR_RETRY_MS 300000UL
 Config config;
 
 Inverter inverters[MAX_INVERTER_COUNT];
+// one decoded reply at a time: filled by ecu_poll, published, overwritten
+static Reading reading;
 bool all_Paired = true;
 uint8_t inverterCount = 0;
 uint32_t lastPoll = 0;
+static bool pairingTried = false;
+static uint32_t lastPairing = 0;
 
 // Serviced between inverters rather than during a transfer: doing it while a
 // frame is in flight costs received bytes.
@@ -22,6 +29,16 @@ void serviceNetwork()
 {
   webserver_loop();
   mqtt_loop();
+}
+
+static bool allPaired()
+{
+  for (uint8_t i = 0; i < inverterCount; i++)
+  {
+    if (!(inverters[i].flags & INV_PAIRED))
+      return false;
+  }
+  return true;
 }
 
 void setup()
@@ -47,7 +64,7 @@ void setup()
   else
   {
     mqtt_begin(config.mqtt_url, config.mqtt_port);
-    inverterCount = loadInverterConfig(inverters);
+    inverterCount = loadInverterConfig(inverters, MAX_INVERTER_COUNT);
 
     if (inverterCount == 0)
     {
@@ -63,17 +80,7 @@ void setup()
 #endif
       ecu_initialize();
 
-      for (uint8_t i = 0; i < inverterCount; i++)
-      {
-        if (inverters[i].iD[0] != 0 && inverters[i].iD[1] != 0)
-        {
-          inverters[i].idx = i;
-          inverters[i].paired = true;
-        }
-        else
-          all_Paired = false;
-      }
-
+      all_Paired = allPaired();
       if (all_Paired)
       {
         ecu_noop();
@@ -83,8 +90,60 @@ void setup()
 
   webserver_begin(); // Actually start the server
 #ifdef DEBUG
-  log_line("HTTP server started");
+  log_line(F("HTTP server started"));
 #endif
+}
+
+// Polls every inverter once and publishes what came back.
+static void pollRound()
+{
+  uint32_t totalPower = 0;
+  uint8_t answered = 0;
+
+  for (uint8_t i = 0; i < inverterCount; i++)
+  {
+    Inverter *inverter = &inverters[i];
+    if (!(inverter->flags & INV_PAIRED))
+    {
+      continue;
+    }
+    serviceNetwork();
+
+    const EcuPollResult result = ecu_poll(inverter, &reading);
+    switch (result)
+    {
+    case ECU_POLL_OK:
+      answered++;
+      totalPower += reading.acPower_W;
+#ifdef DEBUG
+      log_reading(inverter, &reading);
+#endif
+      mqtt_publish(config.mqtt_publish_topic, inverter, &reading);
+      break;
+
+    case ECU_POLL_WENT_OFFLINE:
+      mqtt_publish_offline(config.mqtt_publish_topic, inverter);
+      break;
+
+    case ECU_POLL_UNSUPPORTED:
+      answered++;
+      break;
+
+    case ECU_POLL_FAILED:
+      break;
+    }
+
+    // once per online period, right after a reply proved it reachable.
+    // Until then the telemetry is decoded as DS3.
+    const bool replied = result == ECU_POLL_OK || result == ECU_POLL_UNSUPPORTED;
+    if (replied && inverter->model == 0 && !(inverter->flags & INV_ID_TRIED))
+    {
+      serviceNetwork();
+      ecu_identify(inverter);
+    }
+  }
+
+  logf_P(PSTR("round: %u/%u inverters answered, %luW\n"), answered, inverterCount, (unsigned long)totalPower);
 }
 
 void loop()
@@ -98,24 +157,27 @@ void loop()
     return;
   }
 
-  if (!all_Paired)
+  if (!all_Paired && (!pairingTried || millis() - lastPairing >= PAIR_RETRY_MS))
   {
-    all_Paired = true;
+    bool newlyPaired = false;
     for (uint8_t i = 0; i < inverterCount; i++)
     {
-      if (!inverters[i].paired)
+      if (!(inverters[i].flags & INV_PAIRED) && ecu_pair(&inverters[i]))
       {
-        ecu_pair(&inverters[i]);
+        newlyPaired = true;
       }
-
-      if (!inverters[i].paired)
-        all_Paired = false;
     }
 
-    // if (all_Paired)
-    //  save config
+    // keep the addresses: no pairing on the next boot
+    if (newlyPaired)
+    {
+      saveInverterConfig(inverters, inverterCount);
+    }
 
+    all_Paired = allPaired();
     ecu_noop();
+    pairingTried = true;
+    lastPairing = millis();
     return;
   }
 
@@ -127,19 +189,13 @@ void loop()
   }
   lastPoll = millis();
 
-  ecu_heart_beat();
-
-  for (uint8_t i = 0; i < inverterCount; i++)
+  // module wedged: skip the round, the watchdog reinitialises it
+  if (!ecu_check_alive())
   {
-    serviceNetwork();
-    ecu_poll(&inverters[i]);
-
-    if (inverters[i].paired && inverters[i].polled)
-    {
-      mqtt_publish(config.mqtt_publish_topic, &inverters[i]);
-    }
+    return;
   }
-  log_total(inverters, inverterCount);
+
+  pollRound();
 
 #ifdef DEBUG
   logf_P(PSTR("[Server Connected] : %s\n"), getIP());
