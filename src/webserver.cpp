@@ -31,10 +31,13 @@ void handleInverterConfig(){
 bool handleFileRead(String path) { // send the right file to the client (if it exists)
   logf_P(PSTR("handleFileRead: %s\n"),path.c_str());
   if (path.endsWith("/")) path += "index.html";         // If a folder is requested, send the index file
-  String contentType = path.endsWith(".html") ? "text/html" : "text/plain";            // Get the MIME type
+  const __FlashStringHelper *contentType = path.endsWith(".html") ? F("text/html")
+                                         : path.endsWith(".js")   ? F("application/javascript")
+                                         : path.endsWith(".css")  ? F("text/css")
+                                                                  : F("text/plain");
   if (LittleFS.exists(path)) {                            // If the file exists
     File file = LittleFS.open(path, "r");                 // Open it
-    server.streamFile(file, contentType); // And send it to the client
+    server.streamFile(file, String(contentType)); // And send it to the client
     file.close();                                       // Then close the file again
     return true;
   }

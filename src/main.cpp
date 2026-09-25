@@ -12,6 +12,10 @@
 // An inverter that does not pair (wrong serial, not installed yet) must not
 // stop the others from being polled: pairing is retried at this pace.
 #define PAIR_RETRY_MS 300000UL
+// Soft-AP started because the configured network was not there (box still
+// booting after a power cut...): reboot to try it again, unless someone is
+// connected to the AP to change the settings.
+#define AP_FALLBACK_RETRY_MS 300000UL
 Config config;
 
 Inverter inverters[MAX_INVERTER_COUNT];
@@ -22,6 +26,7 @@ uint8_t inverterCount = 0;
 uint32_t lastPoll = 0;
 static bool pairingTried = false;
 static uint32_t lastPairing = 0;
+static bool apFallback = false;
 
 // Serviced between inverters rather than during a transfer: doing it while a
 // frame is in flight costs received bytes.
@@ -60,6 +65,7 @@ void setup()
   if (!connected) // Here when STA connect fails
   {
     wifi_startAP();
+    apFallback = config.wifi_ssid[0] != 0;
   }
   else
   {
@@ -149,6 +155,12 @@ static void pollRound()
 void loop()
 {
   serviceNetwork();
+
+  if (apFallback && millis() >= AP_FALLBACK_RETRY_MS && wifi_ap_clients() == 0)
+  {
+    log_line(F("configured wifi still unreachable - rebooting to retry"));
+    ESP.restart();
+  }
 
   // nothing configured: only keep the web UI alive so inverters can be added
   if (inverterCount == 0)

@@ -27,11 +27,22 @@ The project can be installed using PlatformIO with the ESP8266 Board package. Bo
 
 You can flash the firmware without pre-configuring Wi-Fi settings.
 
+The data partition (`data/`) only holds the web UI: the settings are entered through it on first
+boot and stored on the device. Reflashing the data partition therefore does **not** overwrite them.
+To pre-configure a board anyway, fill in `provisioning/config.txt` and `provisioning/inverter_config.txt`
+(from the `.template` files next to them) and copy them into `data/` before `pio run -t uploadfs`;
+remove them afterwards, otherwise every later `uploadfs` resets the device settings (and the pairing
+addresses it saved).
+
 ## Configuration
 The configuration is stored in the `LittleFS` file system of the ESP8266.
 
 ### Web Interface
 After flashing the firmware, the device will start in default mode. An access point (AP) named "APS_ECU" with the password "12345678" will be available. Connect to this AP and access the web interface by entering the default IP address `192.168.4.1` in your browser.
+
+If Wi-Fi is configured but the network cannot be reached at boot (e.g. the router is still starting
+after a power cut), the device also opens this access point, and reboots every 5 minutes to retry as
+long as nobody is connected to it.
 
 Through the web interface, you can:
 - Configure Wi-Fi connection.

@@ -27,8 +27,10 @@ function loadInverters() {
         <label for="inverter_#id#_id">Id:</label>
         <input type="text" id="inverter_#id#_id" value="#inverter_id#" required>`;
 
+    // a device that was never configured has no file yet: start from an
+    // empty entry instead of rendering the 404 text
     fetch("/inverter_config.txt")
-        .then(response => response.text())
+        .then(response => response.ok ? response.text() : '')
         .then(data => {
             const lines = data.split('\n');
             console.log(lines);
@@ -39,33 +41,34 @@ function loadInverters() {
                 const splitted = line.split(";");
                 splitted.forEach(element => {
                     const [key, value] = element.split("=");
-                    if (key !== '')
+                    if (key !== '' && value !== undefined)
                         tmp.innerHTML = tmp.innerHTML.replaceAll('#inverter_' + key + '#', value);
 
                 });
+                // fields missing from the line stay empty, not "#inverter_...#"
+                tmp.innerHTML = tmp.innerHTML.replace(/#inverter_[a-z]+#/g, '');
                 document.forms[0].firstElementChild.appendChild(tmp);
             });
-
-
-            loaderDialog.close();
-        });
+        })
+        .finally(() => loaderDialog.close());
 }
 
 function loadConfiguration() {
     const loaderDialog = document.getElementById('loader-dialog');
 
+    // no file on a device that was never configured: show an empty form
     fetch("/config.txt")
-        .then(response => response.text())
+        .then(response => response.ok ? response.text() : '')
         .then(data => {
-            console.log(data);
             const splitted = data.split(";");
             splitted.forEach(element => {
                 const [key, value] = element.split("=");
-                if (key !== '')
-                    document.getElementById(key).value = value;
+                const input = key ? document.getElementById(key) : null;
+                if (input && value !== undefined)
+                    input.value = value;
             });
-            loaderDialog.close();
-        });
+        })
+        .finally(() => loaderDialog.close());
 }
 
 function sendConfiguration() {

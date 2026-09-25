@@ -1,5 +1,8 @@
 .pio
 .vscode
+# real configs: never committed; kept out of data/ so uploadfs ships a neutral image
+provisioning/config.txt
+provisioning/inverter_config.txt
 data/config.txt
 data/inverter_config.txt
 ignore.*
