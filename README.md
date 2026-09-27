@@ -28,11 +28,16 @@ The project can be installed using PlatformIO with the ESP8266 Board package. Bo
 You can flash the firmware without pre-configuring Wi-Fi settings.
 
 The data partition (`data/`) only holds the web UI: the settings are entered through it on first
-boot and stored on the device. Reflashing the data partition therefore does **not** overwrite them.
-To pre-configure a board anyway, fill in `provisioning/config.txt` and `provisioning/inverter_config.txt`
+boot and stored on the device, next to the UI files.
+
+**`pio run -t uploadfs` replaces the whole file system**: it erases the settings and the pairing
+addresses the device saved, and the device restarts as an access point. To update the firmware only,
+use `pio run -t upload`. Reflash the data partition only when the web UI changed, and enter the
+settings again afterwards.
+
+To pre-configure a board, fill in `provisioning/config.txt` and `provisioning/inverter_config.txt`
 (from the `.template` files next to them) and copy them into `data/` before `pio run -t uploadfs`;
-remove them afterwards, otherwise every later `uploadfs` resets the device settings (and the pairing
-addresses it saved).
+remove them from `data/` afterwards so that they are never committed.
 
 ## Configuration
 The configuration is stored in the `LittleFS` file system of the ESP8266.

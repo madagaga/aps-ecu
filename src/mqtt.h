@@ -11,6 +11,11 @@
 // length (2) and the topic itself (Config::mqtt_publish_topic, 64 max)
 #define MQTT_BUFFER_SIZE (MQTT_PAYLOAD_SIZE + 5 + 2 + 64)
 
+// reconnect backoff while the broker is unreachable
+#define MQTT_RETRY_MIN_MS 5000UL
+#define MQTT_RETRY_MAX_MS 60000UL
+
+// Does nothing without a broker URL: mqtt then stays off.
 void mqtt_begin(const char *mqtt_url, int mqtt_port);
 void mqtt_publish(const char *topic, const Inverter *inverter, const Reading *reading);
 // sent once when an inverter stops answering (see ECU_OFFLINE_AFTER)

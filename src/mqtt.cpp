@@ -10,29 +10,61 @@
 static WiFiClient espClient;
 static PubSubClient mqttClient(espClient);
 
-void mqtt_connect()
+// Off until mqtt_begin() got a broker: in soft-AP mode (first boot) there is
+// none, and trying anyway failed on every loop() pass.
+static bool enabled = false;
+static bool attempted = false;
+static uint32_t lastAttempt = 0;
+static uint32_t retryDelay = MQTT_RETRY_MIN_MS;
+
+// A connect attempt blocks while the broker is unreachable, and this runs
+// between two inverters: space the attempts out instead of retrying on
+// every call.
+static void mqtt_connect()
 {
-    if (!mqttClient.connected())
+    if (!enabled || mqttClient.connected())
     {
-        if (mqttClient.connect(MQTT_CLIENT_ID))
-        {
-            log_line(F("mqtt connected"));
-        }
-        else
-        {
-            logf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
-        }
+        return;
     }
+    if (attempted && millis() - lastAttempt < retryDelay)
+    {
+        return;
+    }
+
+    const bool firstAttempt = !attempted;
+    attempted = true;
+    lastAttempt = millis();
+
+    if (mqttClient.connect(MQTT_CLIENT_ID))
+    {
+        log_line(F("mqtt connected"));
+        retryDelay = MQTT_RETRY_MIN_MS;
+        return;
+    }
+
+    if (!firstAttempt)
+    {
+        retryDelay = retryDelay >= MQTT_RETRY_MAX_MS / 2 ? MQTT_RETRY_MAX_MS : retryDelay * 2;
+    }
+    logf_P(PSTR("mqtt connection failed, rc=%i - next attempt in %lus\n"),
+           mqttClient.state(), retryDelay / 1000);
 }
 
 void mqtt_begin(const char *mqtt_url, int mqtt_port)
 {
+    if (mqtt_url[0] == '\0')
+    {
+        log_line(F("no mqtt broker configured - mqtt disabled"));
+        return;
+    }
+
     mqttClient.setServer(mqtt_url, mqtt_port);
     // default is 256 bytes, too small for the payload
     if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE))
     {
         log_line(F("mqtt buffer allocation failed"));
     }
+    enabled = true;
     mqtt_connect();
 }
 
@@ -80,6 +112,10 @@ static void send(const char *topic, bool complete)
 
 void mqtt_publish(const char *topic, const Inverter *inverter, const Reading *reading)
 {
+    if (!enabled)
+    {
+        return;
+    }
     if (!mqttClient.connected())
     {
         log_line(F("mqtt not connected"));
@@ -138,6 +174,10 @@ void mqtt_publish(const char *topic, const Inverter *inverter, const Reading *re
 
 void mqtt_publish_offline(const char *topic, const Inverter *inverter)
 {
+    if (!enabled)
+    {
+        return;
+    }
     if (!mqttClient.connected())
     {
         log_line(F("mqtt not connected"));
@@ -155,7 +195,10 @@ void mqtt_publish_offline(const char *topic, const Inverter *inverter)
 
 void mqtt_loop()
 {
+    if (!enabled)
+    {
+        return;
+    }
     mqtt_connect();
-    
     mqttClient.loop();
 }

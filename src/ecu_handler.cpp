@@ -312,6 +312,7 @@ typedef enum
     ECU_REPLY_NO_ROUTE,
     ECU_REPLY_REJECTED,
     ECU_REPLY_ENCRYPTED,
+    ECU_REPLY_WRONG_SERIAL,
 } EcuReply;
 
 /*
@@ -398,10 +399,22 @@ static EcuReply ecu_transact(Inverter *inverter, uint8_t cmd, const uint8_t **l2
 
             // payload = inverter serial (6) + APsystems frame
             const uint8_t *payload = AF_PAYLOAD(data);
-            if (payloadLen < 7 || memcmp(payload, inverter->serial, 6) != 0)
+            if (payloadLen < 7)
             {
-                log_line(F("reply without this inverter's serial - ignored"));
+                log_line(F("AF payload too short - ignored"));
                 break;
+            }
+            // Right address, other inverter: the address/serial pairing in the
+            // config is wrong. This was the reply, none other will come.
+            if (memcmp(payload, inverter->serial, 6) != 0)
+            {
+                logf_P(PSTR("address %02X%02X answered with serial %02X%02X%02X%02X%02X%02X, "
+                            "configured %02X%02X%02X%02X%02X%02X - ignored\n"),
+                       inverter->addr[0], inverter->addr[1],
+                       payload[0], payload[1], payload[2], payload[3], payload[4], payload[5],
+                       inverter->serial[0], inverter->serial[1], inverter->serial[2],
+                       inverter->serial[3], inverter->serial[4], inverter->serial[5]);
+                return ECU_REPLY_WRONG_SERIAL;
             }
 
             inverter->lqi = AF_LINK_QUALITY(data);

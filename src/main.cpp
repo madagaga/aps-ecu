@@ -103,6 +103,7 @@ void setup()
 // Polls every inverter once and publishes what came back.
 static void pollRound()
 {
+  const uint32_t roundStart = millis();
   uint32_t totalPower = 0;
   uint8_t answered = 0;
 
@@ -149,7 +150,10 @@ static void pollRound()
     }
   }
 
-  logf_P(PSTR("round: %u/%u inverters answered, %luW\n"), answered, inverterCount, (unsigned long)totalPower);
+  // past POLL_INTERVAL_MS the rounds run back to back: the round time is
+  // then the real polling period of each inverter
+  logf_P(PSTR("round: %u/%u inverters answered, %luW, %lums\n"), answered, inverterCount,
+         (unsigned long)totalPower, (unsigned long)(millis() - roundStart));
 }
 
 void loop()
