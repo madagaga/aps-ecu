@@ -5,10 +5,21 @@
 #include <panel_data.h>
 
 #define MQTT_CLIENT_ID "aps_ecu"
-#define MQTT_BUFFER_SIZE 512
+// JSON document; 4 panels is about 450 bytes
+#define MQTT_PAYLOAD_SIZE 512
+// PubSubClient's packet buffer also holds the fixed header (5), the topic
+// length (2) and the topic itself (Config::mqtt_publish_topic, 64 max)
+#define MQTT_BUFFER_SIZE (MQTT_PAYLOAD_SIZE + 5 + 2 + 64)
 
+// reconnect backoff while the broker is unreachable
+#define MQTT_RETRY_MIN_MS 5000UL
+#define MQTT_RETRY_MAX_MS 60000UL
+
+// Does nothing without a broker URL: mqtt then stays off.
 void mqtt_begin(const char *mqtt_url, int mqtt_port);
-void mqtt_publish(const char *topic, Inverter *Inverter);
+void mqtt_publish(const char *topic, const Inverter *inverter, const Reading *reading);
+// sent once when an inverter stops answering (see ECU_OFFLINE_AFTER)
+void mqtt_publish_offline(const char *topic, const Inverter *inverter);
 void mqtt_loop();
 
 #endif

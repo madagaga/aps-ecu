@@ -13,9 +13,8 @@
 #define logf(format, ...) Serial.printf(format, __VA_ARGS__)
 #define logf_P(format, ...) Serial.printf_P(format, __VA_ARGS__)
 
-void log_inverter(Inverter *inverter);
+void log_reading(const Inverter *inverter, const Reading *reading);
 void log_array(uint8_t *array, uint8_t len);
-void log_total(Inverter *inverter, uint8_t len);
 
 
 #endif /* LOGGER_H */

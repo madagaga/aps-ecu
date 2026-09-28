@@ -2,99 +2,104 @@
 #include <PubSubClient.h>
 #include <wifi.h>
 #include <logger.h>
+#include <utils.h>
+#include <stdarg.h>
 
 // Single instance, owned by this translation unit. Defining these in the
 // header gave every includer its own unused copy.
 static WiFiClient espClient;
 static PubSubClient mqttClient(espClient);
 
-void mqtt_connect()
+// Off until mqtt_begin() got a broker: in soft-AP mode (first boot) there is
+// none, and trying anyway failed on every loop() pass.
+static bool enabled = false;
+static bool attempted = false;
+static uint32_t lastAttempt = 0;
+static uint32_t retryDelay = MQTT_RETRY_MIN_MS;
+
+// A connect attempt blocks while the broker is unreachable, and this runs
+// between two inverters: space the attempts out instead of retrying on
+// every call.
+static void mqtt_connect()
 {
-    if (!mqttClient.connected())
+    if (!enabled || mqttClient.connected())
     {
-        if (mqttClient.connect(MQTT_CLIENT_ID))
-        {
-            log_line(F("mqtt connected"));
-        }
-        else
-        {
-            logf_P(PSTR("mqtt connection failed, rc=%i\n"), mqttClient.state());
-        }
+        return;
     }
+    if (attempted && millis() - lastAttempt < retryDelay)
+    {
+        return;
+    }
+
+    const bool firstAttempt = !attempted;
+    attempted = true;
+    lastAttempt = millis();
+
+    if (mqttClient.connect(MQTT_CLIENT_ID))
+    {
+        log_line(F("mqtt connected"));
+        retryDelay = MQTT_RETRY_MIN_MS;
+        return;
+    }
+
+    if (!firstAttempt)
+    {
+        retryDelay = retryDelay >= MQTT_RETRY_MAX_MS / 2 ? MQTT_RETRY_MAX_MS : retryDelay * 2;
+    }
+    logf_P(PSTR("mqtt connection failed, rc=%i - next attempt in %lus\n"),
+           mqttClient.state(), retryDelay / 1000);
 }
 
 void mqtt_begin(const char *mqtt_url, int mqtt_port)
 {
+    if (mqtt_url[0] == '\0')
+    {
+        log_line(F("no mqtt broker configured - mqtt disabled"));
+        return;
+    }
+
     mqttClient.setServer(mqtt_url, mqtt_port);
-    // default is 256 bytes; the payload alone is ~226 and grows if the panel
-    // block is ever enabled
+    // default is 256 bytes, too small for the payload
     if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE))
     {
         log_line(F("mqtt buffer allocation failed"));
     }
+    enabled = true;
     mqtt_connect();
 }
 
-void mqtt_publish(const char *topic, Inverter *Inverter)
-{
-    if (!mqttClient.connected())
-    {
-        log_line(F("mqtt not connected"));
+// static: keeps the scratch buffer off the 4KB stack, since publishing is
+// called from loop()
+static char text[MQTT_PAYLOAD_SIZE];
 
+// Appends to `text` at `*pos`. Returns false once the buffer is full: a
+// truncated JSON document must not be published.
+static bool append(size_t *pos, const char *format, ...)
+{
+    if (*pos >= sizeof(text))
+    {
+        return false;
+    }
+    va_list args;
+    va_start(args, format);
+    const int written = vsnprintf_P(text + *pos, sizeof(text) - *pos, format, args);
+    va_end(args);
+    if (written < 0 || (size_t)written >= sizeof(text) - *pos)
+    {
+        *pos = sizeof(text);
+        return false;
+    }
+    *pos += written;
+    return true;
+}
+
+static void send(const char *topic, bool complete)
+{
+    if (!complete)
+    {
+        log_line(F("mqtt payload truncated - not published"));
         return;
     }
-
-    // static: keeps the scratch buffer off the 4KB stack, since
-    // mqtt_publish is called from loop()
-    static char text[MQTT_BUFFER_SIZE];
-    snprintf(text, sizeof(text), "{"
-                  "\"type\":\"inverter\","
-                  "\"serial\":\"%02X-%02X-%02X-%02X-%02X-%02X\","
-                  "\"id\":\"%02X-%02X\","
-                  "\"invType\":%d,"
-                  "\"index\":%i,"
-                  "\"polled\":%i,"
-                  "\"power\":%i,"
-                  "\"frequency\":%.2f,"
-                  "\"temperature\":%.2f,"
-                  "\"voltage\":%.2f,"
-                  "\"energy\":%.2f,"
-                  "\"deviceID\":\"%s\""
-                  "}",
-            Inverter->serial[0], Inverter->serial[1], Inverter->serial[2], Inverter->serial[3], Inverter->serial[4], Inverter->serial[5],
-            Inverter->iD[0], Inverter->iD[1],
-            Inverter->invType,
-            Inverter->idx,
-            Inverter->polled,
-            Inverter->acPower,
-            Inverter->frequency,
-            Inverter->temperature,
-            Inverter->acVoltage,
-            Inverter->energy,
-            getMAC());
-
-    // include panels data: format [ array of panels]
-    // strcat(text, ",\"panels\":[");
-    // for (int i = 0; i < 4; i++)
-    // {
-    //     // skip panel if not present
-    //     if(Inverter->panels[i].present == false)
-    //     {
-    //         continue;
-    //     }
-    //     if (i > 0)
-    //     {
-    //         strcat(text, ",");
-    //     }
-    //     char panelText[128];
-    //     sprintf(panelText, "{\"dcVoltage\":%.2f,\"dcCurrent\":%.2f,\"energy\":%.2f}",
-    //             Inverter->panels[i].dcVoltage,
-    //             Inverter->panels[i].dcCurrent,
-    //             Inverter->panels[i].energy);
-    //     strcat(text, panelText);
-
-    // }
-    // strcat(text, "]}");
 
     log_line(text);
 #ifdef DEBUG
@@ -105,9 +110,95 @@ void mqtt_publish(const char *topic, Inverter *Inverter)
 #endif
 }
 
+void mqtt_publish(const char *topic, const Inverter *inverter, const Reading *reading)
+{
+    if (!enabled)
+    {
+        return;
+    }
+    if (!mqttClient.connected())
+    {
+        log_line(F("mqtt not connected"));
+        return;
+    }
+
+    char serial[13];
+    char addr[5];
+    char status[11];
+    toHex(inverter->serial, 6, serial);
+    toHex(inverter->addr, 2, addr);
+    toHex(reading->status, sizeof(reading->status), status);
+
+    uint32_t energy = 0;
+    for (uint8_t i = 0; i < reading->panelCount; i++)
+    {
+        energy += reading->panels[i].energy_Wh;
+    }
+
+    size_t pos = 0;
+    bool ok = append(&pos, PSTR("{"
+                                "\"type\":\"inverter\","
+                                "\"serial\":\"%s\","
+                                "\"addr\":\"%s\","
+                                "\"model\":%u,"
+                                "\"online\":true,"
+                                "\"lqi\":%u,"
+                                "\"power\":%u,"
+                                "\"reactive\":%d,"
+                                "\"voltage\":%.1f,"
+                                "\"frequency\":%.2f,"
+                                "\"temperature\":%.1f,"
+                                "\"counter\":%u,"
+                                "\"status\":\"%s\","
+                                "\"faults\":%u,"
+                                "\"energy\":%lu,"
+                                "\"deviceID\":\"%s\","
+                                "\"panels\":["),
+                     serial, addr, inverter->model, inverter->lqi,
+                     reading->acPower_W, reading->reactive_VAR,
+                     reading->acVoltage_dV / 10.0f, reading->frequency_cHz / 100.0f,
+                     reading->temperature_dC / 10.0f, reading->counter_s,
+                     status, reading->faults, (unsigned long)energy, getMAC());
+
+    for (uint8_t i = 0; ok && i < reading->panelCount; i++)
+    {
+        const PanelReading *p = &reading->panels[i];
+        ok = append(&pos, PSTR("%s{\"voltage\":%.2f,\"current\":%.3f,\"energy\":%lu}"),
+                    i > 0 ? "," : "",
+                    p->voltage_cV / 100.0f, p->current_mA / 1000.0f, (unsigned long)p->energy_Wh);
+    }
+    ok = ok && append(&pos, PSTR("]}"));
+
+    send(topic, ok);
+}
+
+void mqtt_publish_offline(const char *topic, const Inverter *inverter)
+{
+    if (!enabled)
+    {
+        return;
+    }
+    if (!mqttClient.connected())
+    {
+        log_line(F("mqtt not connected"));
+        return;
+    }
+
+    char serial[13];
+    toHex(inverter->serial, 6, serial);
+
+    size_t pos = 0;
+    const bool ok = append(&pos, PSTR("{\"type\":\"inverter\",\"serial\":\"%s\",\"online\":false,\"deviceID\":\"%s\"}"),
+                           serial, getMAC());
+    send(topic, ok);
+}
+
 void mqtt_loop()
 {
+    if (!enabled)
+    {
+        return;
+    }
     mqtt_connect();
-    
     mqttClient.loop();
 }

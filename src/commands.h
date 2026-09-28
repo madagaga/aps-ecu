@@ -41,14 +41,13 @@ extern const uint8_t PAIR_3_COMMAND[39];
 //                               24    02    0F    FF    FF    FF    FF    FF    FF    FF    FF    14    FF    FF    14    01    01    03    00    0F    06    00
 extern const uint8_t PAIR_4_COMMAND[28];
 
-
-// firmware version request
-//                                                                                                                                             FB    FB    06    DC    00    00    00    00    00    00    E2    FE    FE
-// poll request 
-//                                                                                                                                             FB    FB    06    BB    00    00    00    00    00    0C1FEFE
-//                                 24    01    %s          14    14    06    00    01    00    0F    13                                  %s    FB    FB    06    BB    00    00    00    00    00    00    C1    FE    FE
-//                                            I    D       14    14    06    00    01    00    0F    13                                        FB    FB    06    BB    00    00    00    00    00    00    C1    FE    FE
-extern const uint8_t POLL_1_COMMAND[31];
+// AF_DATA_REQUEST to one inverter, as the stock ECU sends it:
+//   24 01 | DstAddr(2) | DstEP 14 | SrcEP 14 | Cluster 0006 (LE) | TransID 01 | Options 00 | Radius 0F | Len
+// followed by ECU_ID_REVERSE and the APsystems frame. DstAddr and Len are
+// filled in per request.
+#define AF_UNICAST_ADDR_OFFSET 2
+#define AF_UNICAST_LEN_OFFSET 11
+extern const uint8_t AF_UNICAST_HEADER[12];
 
 //                             24    01    FF    FF    14    14    06    00    01    00    0F    1E                                        FB    FB   11     00    00    0D    60    30    FB    D3    00    00    00    00    00    00    00    00    04    01    02    81    FE    FE
 extern const uint8_t NOOP_COMMAND[42];

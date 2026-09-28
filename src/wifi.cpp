@@ -2,7 +2,6 @@
 
 // soft-AP addressing
 static IPAddress local_IP(192, 168, 4, 1);
-static IPAddress gateway(192, 168, 4, 254);
 static IPAddress subnet(255, 255, 255, 0);
 
 static char wifi_IP[16];  // 255.255.255.255
@@ -11,7 +10,7 @@ static char wifi_MAC[18]; // AA:BB:CC:DD:EE:FF
 void wifi_startAP() {
     // start softAP
     WiFi.mode(WIFI_AP);    
-    logf_P(PSTR("Starting softAP : %s\n"),WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
+    logf_P(PSTR("Starting softAP : %s\n"),WiFi.softAPConfig(local_IP, local_IP, subnet) ? "Ready" : "Failed!");
     WiFi.softAP("APS_ECU", "12345678");
     WiFi.softAPIP().toString().toCharArray(wifi_IP, 16);
     logf_P(PSTR("Soft-AP IP address = %s\n"), wifi_IP);
@@ -41,6 +40,11 @@ bool wifi_connect(uint8_t max_tries) {
     logf_P(PSTR("IP address: %s\n"), wifi_IP);
     WiFi.macAddress().toCharArray(wifi_MAC, 18);
     return true;
+}
+
+uint8_t wifi_ap_clients()
+{
+    return WiFi.softAPgetStationNum();
 }
 
 char * getIP()

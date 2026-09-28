@@ -13,78 +13,23 @@ void log_array(uint8_t *array, uint8_t len)
   Serial.println(); // Print a newline at the end
 }
 
-void log_inverter(Inverter *inverter)
+void log_reading(const Inverter *inverter, const Reading *reading)
 {
-  Serial.printf_P(PSTR("Serial: %02X-%02X-%02X-%02X-%02X-%02X\n"), inverter->serial[0], inverter->serial[1], inverter->serial[2], inverter->serial[3], inverter->serial[4], inverter->serial[5]);
-  Serial.printf_P(PSTR("ID: %02X-%02X\n"), inverter->iD[0], inverter->iD[1]);
-  Serial.printf_P(PSTR("Type: %i\n"), inverter->invType);
-  Serial.printf_P(PSTR("Idx: %i\n"), inverter->idx);
+  Serial.printf_P(PSTR("Serial: %02X%02X%02X%02X%02X%02X  addr %02X%02X  model %02X  lqi %u\n"),
+                  inverter->serial[0], inverter->serial[1], inverter->serial[2],
+                  inverter->serial[3], inverter->serial[4], inverter->serial[5],
+                  inverter->addr[0], inverter->addr[1], inverter->model, inverter->lqi);
+  Serial.printf_P(PSTR("Power: %uW  reactive %dVAR\n"), reading->acPower_W, reading->reactive_VAR);
+  Serial.printf_P(PSTR("AC: %.1fV  %.2fHz\n"), reading->acVoltage_dV / 10.0f, reading->frequency_cHz / 100.0f);
+  Serial.printf_P(PSTR("Temperature: %.1fC  counter %us\n"), reading->temperature_dC / 10.0f, reading->counter_s);
+  Serial.printf_P(PSTR("Status: %02X %02X %02X %02X %02X  faults %04X\n"),
+                  reading->status[0], reading->status[1], reading->status[2],
+                  reading->status[3], reading->status[4], reading->faults);
 
-  Serial.printf_P(PSTR("Polled: %i\n"), inverter->polled);
-
-  Serial.printf_P(PSTR("TimeStamp: %i\n"), inverter->timeStamp);
-  
-  Serial.printf_P(PSTR("Power: %iW\n"), inverter->acPower);
-
-  Serial.printf_P(PSTR("Frequency: %.2fHz\n"), inverter->frequency);
-
-  Serial.printf_P(PSTR("Temperature: %.2f°C\n"), inverter->temperature);
-  
-  Serial.printf_P(PSTR("AC Voltage: %.2fV\n"), inverter->acVoltage);
-
-  //0x00 (both panel power generate), 0x02 (under/overload?), 0x03 (no power generate), 0x04 (???), 0x05 (only DC2 power generate), 0x06 (only DC1 power generate), 0x0b (boot up?), 0x0c (boot up?)
-  switch(inverter->status)
+  for (uint8_t i = 0; i < reading->panelCount; i++)
   {
-    case 0x00:
-      Serial.println(F("Both power generate"));
-      break;
-    case 0x02:
-      Serial.println(F("Overload"));
-      break;
-    case 0x03:
-      Serial.println(F("No power generate"));
-      break;
-    case 0x04:
-      Serial.println(F("???"));
-      break;
-    case 0x05:
-      Serial.println(F("Only DC2 power generate"));
-      break;
-    case 0x06:
-      Serial.println(F("Only DC1 power generate"));
-      break;
-    case 0x0b:
-      Serial.println(F("Boot up 1"));
-      break;
-    case 0x0c:
-      Serial.println(F("Boot up 2"));
-      break;
-      default:
-      Serial.printf_P(PSTR("Status: %02X\n"), inverter->status);
-      break;
-
+    const PanelReading *p = &reading->panels[i];
+    Serial.printf_P(PSTR("Panel %u: %.2fV  %.3fA  %luWh\n"), i,
+                    p->voltage_cV / 100.0f, p->current_mA / 1000.0f, (unsigned long)p->energy_Wh);
   }
-  // for each inverter print data
-  for (uint8_t i = 0; i < 2; i++)
-  {
-    Serial.printf_P(PSTR("****** Panel %i ******\n"), i);
-    Serial.printf_P(PSTR("DC current : %.2f\n"), inverter->panels[i].dcCurrent);
-    Serial.printf_P(PSTR("DC voltage : %.2f\n"), inverter->panels[i].dcVoltage);
-    Serial.printf_P(PSTR("Energy : %.2f\n"), inverter->panels[i].energy);
-    Serial.println("************");
-  }
-}
-
-void log_total(Inverter *inverter, uint8_t len)
-{
-  float totalPower = 0;
-  float totalEnergy = 0;
-  for (uint8_t i = 0; i < len; i++)
-  {
-    totalPower += inverter[i].acPower;
-    totalEnergy += inverter[i].energy;
-  }
-
-  Serial.printf_P(PSTR("Total Power: %.2fW\n"), totalPower);
-  Serial.printf_P(PSTR("Total Energy: %.2fWh\n"), totalEnergy);
 }

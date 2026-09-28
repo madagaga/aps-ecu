@@ -1,182 +1,199 @@
 #include <config.h>
 
-// Copy a field of `len` bytes and always null-terminate. Truncates instead of
-// overflowing when the field is longer than the destination.
-static void copyField(char *dest, size_t destSize, const char *src, int len)
+// Copy a value and always null-terminate. Truncates instead of overflowing
+// when the value is longer than the destination.
+static void copyField(char *dest, size_t destSize, const char *src)
 {
-    if (len < 0)
+    if (strlcpy(dest, src, destSize) >= destSize)
     {
-        len = 0;
+        logf_P(PSTR("config value truncated to %u characters: %s\n"), destSize - 1, dest);
     }
-    if ((size_t)len >= destSize)
-    {
-        len = destSize - 1;
-    }
-    memcpy(dest, src, len);
-    dest[len] = '\0';
 }
 
-static bool isZero(const uint8_t *data, size_t len)
-{
-    for (size_t i = 0; i < len; i++)
-    {
-        if (data[i] != 0)
-        {
-            return false;
-        }
-    }
-    return true;
-}
+typedef void (*KeyValueHandler)(const char *key, const char *value, void *ctx);
 
-// Read a whole config file into `buffer` and null-terminate it.
-// Returns the number of bytes read, or -1 when the file cannot be opened.
-static int readConfigFile(const char *path, char *buffer, size_t bufferSize)
+/*
+ * Calls `handler` for every "key=value" token of the file. ';' and line ends
+ * both close a token. The file is read byte by byte: no whole-file buffer on
+ * the 4KB stack, and the file size does not cap the number of inverters.
+ */
+static bool parseKeyValueFile(const char *path, KeyValueHandler handler, void *ctx)
 {
     File file = LittleFS.open(path, "r");
     if (!file)
     {
-        logf("config file not found: %s\n", path);
-        return -1;
+        logf_P(PSTR("config file not found: %s\n"), path);
+        return false;
     }
 
-    size_t len = file.readBytes(buffer, bufferSize - 1);
+    char token[MAX_CONFIG_TOKEN];
+    uint8_t len = 0;
+    bool overflow = false;
+
+    while (true)
+    {
+        const int c = file.read();
+        if (c < 0 || c == ';' || c == '\n' || c == '\r')
+        {
+            if (overflow)
+            {
+                log_line(F("config token too long - ignored"));
+            }
+            else if (len > 0)
+            {
+                token[len] = '\0';
+                char *eq = strchr(token, '=');
+                if (eq != NULL)
+                {
+                    *eq = '\0';
+                    handler(token, eq + 1, ctx);
+                }
+            }
+            len = 0;
+            overflow = false;
+
+            if (c < 0)
+            {
+                break;
+            }
+            continue;
+        }
+
+        if (len < sizeof(token) - 1)
+        {
+            token[len++] = (char)c;
+        }
+        else
+        {
+            overflow = true;
+        }
+    }
+
     file.close();
-    buffer[len] = '\0';
-    return (int)len;
+    return true;
+}
+
+static void onConfigValue(const char *key, const char *value, void *ctx)
+{
+    Config *config = (Config *)ctx;
+
+    if (strcmp(key, "wifi_ssid") == 0)
+        copyField(config->wifi_ssid, sizeof(config->wifi_ssid), value);
+    else if (strcmp(key, "wifi_password") == 0)
+        copyField(config->wifi_password, sizeof(config->wifi_password), value);
+    else if (strcmp(key, "mqtt_url") == 0)
+        copyField(config->mqtt_url, sizeof(config->mqtt_url), value);
+    else if (strcmp(key, "mqtt_port") == 0)
+        config->mqtt_port = atoi(value);
+    else if (strcmp(key, "mqtt_username") == 0)
+        copyField(config->mqtt_username, sizeof(config->mqtt_username), value);
+    else if (strcmp(key, "mqtt_password") == 0)
+        copyField(config->mqtt_password, sizeof(config->mqtt_password), value);
+    else if (strcmp(key, "mqtt_publish_topic") == 0)
+        copyField(config->mqtt_publish_topic, sizeof(config->mqtt_publish_topic), value);
+    else
+        return;
+
+#ifdef DEBUG
+    logf_P(PSTR("%s: %s\n"), key, value);
+#endif
 }
 
 void loadConfig(Config *config)
 {
     memset(config, 0, sizeof(Config));
+    parseKeyValueFile(CONFIG_PATH, onConfigValue, config);
+}
 
-    char buffer[1024];
-    int len = readConfigFile(CONFIG_PATH, buffer, sizeof(buffer));
-    if (len <= 0)
+typedef struct
+{
+    Inverter *inverters;
+    uint8_t max;
+    uint8_t count;
+    bool current; // the last "serial" was accepted, so "id" belongs to it
+} InverterLoad;
+
+// one entry per "serial=<12 hex>;id=<4 hex, may be empty>;"
+static void onInverterValue(const char *key, const char *value, void *ctx)
+{
+    InverterLoad *load = (InverterLoad *)ctx;
+
+    if (strcmp(key, "serial") == 0)
     {
-        return;
+        load->current = false;
+        if (load->count >= load->max)
+        {
+            log_line(F("too many inverters configured - extra entries ignored"));
+            return;
+        }
+
+        Inverter *inverter = &load->inverters[load->count];
+        memset(inverter, 0, sizeof(Inverter));
+        static const uint8_t zero[6] = {0};
+        // an entry without a serial cannot be paired, drop it
+        if (!parseHex(value, inverter->serial, 6) || memcmp(inverter->serial, zero, 6) == 0)
+        {
+            logf_P(PSTR("skipping inverter entry with invalid serial '%s'\n"), value);
+            return;
+        }
+        load->count++;
+        load->current = true;
     }
-
-    int end = 0;
-    for (int i = 0; i < 7; i++)
+    else if (strcmp(key, "id") == 0 && load->current)
     {
-        int start = indexOf(buffer, len, '=', end) + 1;
-        if (start <= 0)
+        Inverter *inverter = &load->inverters[load->count - 1];
+        if (value[0] == '\0')
         {
-            break;
+            return; // not paired yet
         }
-        end = indexOf(buffer, len, ';', start);
-        if (end < 0)
+        if (!parseHex(value, inverter->addr, 2))
         {
-            break;
+            logf_P(PSTR("ignoring invalid inverter id '%s'\n"), value);
+            return;
         }
-
-        switch (i)
+        const bool unset = (inverter->addr[0] == 0x00 && inverter->addr[1] == 0x00) ||
+                           (inverter->addr[0] == 0xFF && inverter->addr[1] == 0xFF);
+        if (!unset)
         {
-        case 0:
-            copyField(config->wifi_ssid, sizeof(config->wifi_ssid), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("wifi_ssid: %s\n", config->wifi_ssid);
-            #endif
-            break;
-        case 1:
-            copyField(config->wifi_password, sizeof(config->wifi_password), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("wifi_password: %s\n", config->wifi_password);
-            #endif
-            break;
-        case 2:
-            copyField(config->mqtt_url, sizeof(config->mqtt_url), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("mqtt_url: %s\n", config->mqtt_url);
-            #endif
-            break;
-        case 3:
-            config->mqtt_port = atoi(buffer + start);
-            #ifdef DEBUG
-            logf("mqtt_port: %i\n", config->mqtt_port);
-            #endif
-            break;
-        case 4:
-            copyField(config->mqtt_username, sizeof(config->mqtt_username), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("mqtt_username: %s\n", config->mqtt_username);
-            #endif
-            break;
-        case 5:
-            copyField(config->mqtt_password, sizeof(config->mqtt_password), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("mqtt_password: %s\n", config->mqtt_password);
-            #endif
-            break;
-        case 6:
-            copyField(config->mqtt_publish_topic, sizeof(config->mqtt_publish_topic), buffer + start, end - start);
-            #ifdef DEBUG
-            logf("mqtt_publish_topic: %s\n", config->mqtt_publish_topic);
-            #endif
-            break;
+            inverter->flags |= INV_PAIRED;
         }
     }
 }
 
-uint8_t loadInverterConfig(Inverter inverters[MAX_INVERTER_COUNT])
+uint8_t loadInverterConfig(Inverter *inverters, uint8_t max)
 {
-    char buffer[1024];
-    int len = readConfigFile(INVERTER_PATH, buffer, sizeof(buffer));
-    if (len <= 0)
+    InverterLoad load = {inverters, max, 0, false};
+    parseKeyValueFile(INVERTER_PATH, onInverterValue, &load);
+
+    logf_P(PSTR("inverters configured: %u\n"), load.count);
+    return load.count;
+}
+
+bool saveInverterConfig(const Inverter *inverters, uint8_t count)
+{
+    File file = LittleFS.open(INVERTER_PATH, "w");
+    if (!file)
     {
-        return 0;
+        log_line(F("cannot write the inverter config"));
+        return false;
     }
 
-    char serial[13] = {0};
-    char id[5] = {0};
-    int pos = 0;
-    uint8_t count = 0;
-
-    // one entry per "serial=<12 hex>;id=<4 hex>;" pair, at most MAX_INVERTER_COUNT
-    while (count < MAX_INVERTER_COUNT)
+    char serial[13];
+    char id[5];
+    for (uint8_t i = 0; i < count; i++)
     {
-        int start = indexOf(buffer, len, '=', pos) + 1;
-        if (start <= 0)
-        {
-            break;
-        }
-        int end = indexOf(buffer, len, ';', start);
-        if (end < 0)
-        {
-            break;
-        }
-        copyField(serial, sizeof(serial), buffer + start, end - start);
+        toHex(inverters[i].serial, 6, serial);
+        if (inverters[i].flags & INV_PAIRED)
+            toHex(inverters[i].addr, 2, id);
+        else
+            id[0] = '\0';
 
-        start = indexOf(buffer, len, '=', end) + 1;
-        if (start <= 0)
-        {
-            break;
-        }
-        end = indexOf(buffer, len, ';', start);
-        if (end < 0)
-        {
-            break;
-        }
-        copyField(id, sizeof(id), buffer + start, end - start);
-        pos = end + 1;
-
-        convertToByteArray(serial, inverters[count].serial);
-        convertToByteArray(id, inverters[count].iD);
-
-        // an entry without a serial cannot be paired, drop it
-        if (isZero(inverters[count].serial, sizeof(inverters[count].serial)))
-        {
-            memset(inverters[count].serial, 0, sizeof(inverters[count].serial));
-            memset(inverters[count].iD, 0, sizeof(inverters[count].iD));
-            log_line(F("skipping inverter entry without serial"));
-            continue;
-        }
-
-        log_array(inverters[count].serial, 6);
-        count++;
+        // same layout as the web UI writes; no trailing newline, the UI
+        // would show an empty entry for it
+        file.printf_P(PSTR("%sserial=%s;id=%s;"), i > 0 ? "\n" : "", serial, id);
     }
+    file.close();
 
-    logf("inverters configured: %u", count);
-    log_line("");
-    return count;
+    log_line(F("inverter config saved"));
+    return true;
 }

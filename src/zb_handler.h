@@ -43,6 +43,9 @@
 #define ZNP_CMD(f)  ((uint16_t)(((f)[2] << 8) | (f)[3]))
 #define ZNP_DATA(f) ((f) + 4)
 
+// buffer size a caller must provide to zigbee_recv()
+#define ZB_BUFFER_SIZE ZB_MAX_FRAME
+
 #define ZNP_AF_DATA_CONFIRM          0x4480
 #define ZNP_AF_INCOMING_MSG          0x4481
 #define ZNP_AF_DATA_REQUEST_SRSP     0x6401

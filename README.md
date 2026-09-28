@@ -6,13 +6,16 @@ This is an ESP8266-based project to poll APSystems inverters and publish the dat
 - [read-APSystems-YC600-QS1-DS3](https://github.com/patience4711/read-APSystems-YC600-QS1-DS3)
 - [ApsYc600-Pythonlib](https://github.com/No13/ApsYc600-Pythonlib)
 - [APSystems ZigBee DS3 Poll](https://gitlab.com/moreroid/apsystems/-/blob/main/zigbee/apsystems-zigbee-ds3-poll.txt?ref_type=heads)
+- [OpenAPS](https://github.com/bolkedebruin/openaps): the APsystems frame layer (`FB FB ... FE FE` framing and checksum), the DS3 field layout and scales, the fault bits, the `0xDC` model query and the watchdog / online tracking approach are modelled on its reverse-engineered codec
 
 ## Features
 - Supports APSystems actually DS3 inverters.  
 - ZigBee communication.
 - Configurable via a web interface.
 - No data retention or history.
-- Supports multiple inverters (may be limited by memory) tested with 3 inverters and 2 panel on each. 
+- Supports up to 64 inverters (12 bytes of RAM each); tested with 3 inverters and 2 panels on each.
+- Short addresses are saved after pairing: no pairing on the next boot.
+- The zigbee module is reinitialised when it stops answering.
 - Publishes data to mqtt - actually user/password not supported 
 
 ## Installation
@@ -24,11 +27,27 @@ The project can be installed using PlatformIO with the ESP8266 Board package. Bo
 
 You can flash the firmware without pre-configuring Wi-Fi settings.
 
+The data partition (`data/`) only holds the web UI: the settings are entered through it on first
+boot and stored on the device, next to the UI files.
+
+**`pio run -t uploadfs` replaces the whole file system**: it erases the settings and the pairing
+addresses the device saved, and the device restarts as an access point. To update the firmware only,
+use `pio run -t upload`. Reflash the data partition only when the web UI changed, and enter the
+settings again afterwards.
+
+To pre-configure a board, fill in `provisioning/config.txt` and `provisioning/inverter_config.txt`
+(from the `.template` files next to them) and copy them into `data/` before `pio run -t uploadfs`;
+remove them from `data/` afterwards so that they are never committed.
+
 ## Configuration
 The configuration is stored in the `LittleFS` file system of the ESP8266.
 
 ### Web Interface
 After flashing the firmware, the device will start in default mode. An access point (AP) named "APS_ECU" with the password "12345678" will be available. Connect to this AP and access the web interface by entering the default IP address `192.168.4.1` in your browser.
+
+If Wi-Fi is configured but the network cannot be reached at boot (e.g. the router is still starting
+after a power cut), the device also opens this access point, and reboots every 5 minutes to retry as
+long as nobody is connected to it.
 
 Through the web interface, you can:
 - Configure Wi-Fi connection.
@@ -41,38 +60,56 @@ Once Wi-Fi is configured, you can access the local web server via the device's I
 The MQTT topics for the published data are defined in the web interface. They follow a structure that you can customize based on your configuration.
 
 #### Example MQTT Payload
-The payload sent to the MQTT broker is a JSON object containing the inverter's data. Below is an example structure:
+One JSON object per inverter and per poll (DS3, values from a real frame):
 
 ```json
 {
   "type": "inverter",
-  "serial": "12-34-56-78-9A-BC",
-  "id": "12-34",
-  "invType": 1,
-  "index": 0,
-  "polled": 1,
-  "power": 350,
-  "frequency": 60.00,
-  "temperature": 35.50,
-  "voltage": 230.00,
-  "energy": 1234.56,
-  "mac": "AA:BB:CC:DD:EE:FF"
+  "serial": "703000080835",
+  "addr": "7603",
+  "model": 32,
+  "online": true,
+  "lqi": 115,
+  "power": 21,
+  "reactive": 29,
+  "voltage": 239.9,
+  "frequency": 50.01,
+  "temperature": 27.6,
+  "counter": 1028,
+  "status": "0000000000",
+  "faults": 0,
+  "energy": 9,
+  "deviceID": "AA:BB:CC:DD:EE:FF",
+  "panels": [
+    {"voltage": 34.36, "current": 0.352, "energy": 4},
+    {"voltage": 34.32, "current": 0.481, "energy": 5}
+  ]
 }
 ```
 
+When an inverter stops answering (30 failed polls in a row) a single message is sent:
+
+```json
+{"type": "inverter", "serial": "703000080835", "online": false, "deviceID": "AA:BB:CC:DD:EE:FF"}
+```
+
 **Payload Fields**:
-- `type`: DS3 or other .
-- `serial`: Serial number of the inverter.
-- `id`: Identifier of the inverter.
-- `invType`: Inverter type (numerical value).
-- `index`: Index of the inverter in the system.
-- `polled`: Indicates if the inverter has been successfully polled.
-- `power`: Current power output (in watts).
-- `frequency`: Frequency in hertz (Hz).
-- `temperature`: Temperature in degrees Celsius.
-- `voltage`: Voltage in volts (V).
-- `energy`: Energy produced in kilowatt-hours (kWh).
-- `mac`: MAC address of the device that polled the inverter.
+- `serial`: inverter serial, as printed on the label.
+- `addr`: zigbee short address assigned at pairing.
+- `model`: model code reported by the inverter (32 = DS3, 33 = DS3-H, 34 = DS3-L), 0 until identified.
+- `lqi`: link quality of the reply, 0-255.
+- `power`: AC power in W, as measured by the inverter. `reactive`: reactive power in VAR.
+- `voltage` (V), `frequency` (Hz), `temperature` (degC): AC side.
+- `counter`: inverter uptime counter in seconds.
+- `status`: raw status bytes (hex). `faults`: bit mask decoded from them:
+  1 AC over-voltage, 2 AC under-voltage, 4 over-frequency, 8 under-frequency, 16 grid relay,
+  32 DC bus, 64 DC contactor, 128 DC ground, 256 isolation.
+- `energy`: energy counter of the inverter in Wh, total and per panel. **Not a lifetime total**:
+  the inverter resets it by itself, the consumer has to accumulate deltas.
+- `panels`: DC voltage (V), current (A) and energy (Wh) per input.
+- `deviceID`: MAC address of the ESP.
+
+Only DS3 replies are decoded; other models are identified and logged but not published.
 
 ## Usage
 1. **Flashing the Firmware**: Flash the firmware without Wi-Fi pre-configured if desired.

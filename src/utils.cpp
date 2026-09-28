@@ -1,26 +1,9 @@
 #include <utils.h>
 
-int16_t indexOf(const char *data, uint16_t data_len, const char pattern, int startIndex)
-{
-    if (startIndex < 0)
-    {
-        return -1;
-    }
-
-    for (int i = startIndex; i < data_len; i++)
-    {
-        if (data[i] == pattern)
-        {
-            return i;
-        }
-    }
-    return -1;
-}
-
 int16_t indexOf(const uint8_t *data, uint16_t data_len, const uint8_t *pattern, uint8_t pattern_len)
 {
     if (data_len < pattern_len)
-    {        
+    {
         return -2; // No match possible if data is shorter than the pattern
     }
 
@@ -35,32 +18,50 @@ int16_t indexOf(const uint8_t *data, uint16_t data_len, const uint8_t *pattern, 
     return -1;
 }
 
-
-
-float toFloat(const uint8_t *buffer, uint8_t index, uint8_t length)
+static int8_t hexDigit(char c)
 {
-    return (float)toInt(buffer, index, length);
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
 }
 
-int toInt(const uint8_t *buffer, uint8_t index, uint8_t length)
+bool parseHex(const char *hex, uint8_t *out, uint8_t len)
 {
-    int result = 0;
-    for (uint8_t i = index; i < index + length; i++)
+    if (strlen(hex) != (size_t)len * 2)
     {
-        result = (result << 8) | buffer[i];
+        return false;
     }
-    return result;
+
+    uint8_t tmp[8];
+    if (len > sizeof(tmp))
+    {
+        return false;
+    }
+    for (uint8_t i = 0; i < len; i++)
+    {
+        const int8_t hi = hexDigit(hex[2 * i]);
+        const int8_t lo = hexDigit(hex[2 * i + 1]);
+        if (hi < 0 || lo < 0)
+        {
+            return false;
+        }
+        tmp[i] = (hi << 4) | lo;
+    }
+    memcpy(out, tmp, len);
+    return true;
 }
 
-void convertToByteArray(const char *hexString, uint8_t *destination)
+void toHex(const uint8_t *data, uint8_t len, char *out)
 {
-    // Iterate over each pair of characters in the hexadecimal string
-    for (int i = 0; hexString[i] && hexString[i + 1]; i += 2)
+    static const char digits[] = "0123456789ABCDEF";
+    for (uint8_t i = 0; i < len; i++)
     {
-        // Convert the pair of hexadecimal characters to a byte value
-        int value = 0;
-        sscanf(hexString + i, "%02x", &value); // Read two characters and interpret as hexadecimal
-        // Store the byte value in the destination array
-        *destination++ = value;
+        out[2 * i] = digits[data[i] >> 4];
+        out[2 * i + 1] = digits[data[i] & 0x0F];
     }
+    out[2 * len] = '\0';
 }
